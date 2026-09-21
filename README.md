@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 131 tests across core, app and extension
+npm test           # 146 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 npm run bench -w core   # measure download throughput
@@ -66,8 +66,14 @@ reads "MP4 file" five times over.
 
 **Media detection.** The extension watches response headers for video, audio,
 HLS and DASH content types and scans the DOM for `<video>`/`<audio>`.
-Detections are deduplicated (a seeking player fires dozens of near-identical
-requests) and filtered by a size floor so ad beacons don't fill the list.
+
+Two details decide whether this works at all on a streaming site. A player
+fetches media in small ranged chunks, so `Content-Length` describes the chunk
+and not the file — the size floor has to read the total from `Content-Range` or
+it rejects every real video for being too small. And an attachment only counts
+as a download if it actually names a file: subtitle and telemetry endpoints are
+served with `Content-Disposition: attachment` and would otherwise fill the panel
+with 1 KB JSON while the video went missing.
 
 **Download takeover that cannot lose a download.** `chrome.downloads.cancel()`
 is irreversible, and a signed or one-time URL 403s when replayed. So the

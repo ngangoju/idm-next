@@ -37,7 +37,74 @@ export const MIN_MEDIA_BYTES = 200 * 1024;
 const VOLATILE_PARAMS = [
   'range', 'start', 'end', 'offset', 'seek', 't', 'time', 'timestamp',
   '_', 'cachebust', 'sig', 'signature', 'expires', 'token', 'nonce', 'bytestart', 'byteend',
+  // Streaming players re-request the same rendition constantly with a moving
+  // range and a request counter; without these one video becomes fifty rows.
+  'rn', 'rbuf', 'cpn', 'ver', 'cver', 'alr', 'gir', 'dur', 'lmt', 'keepalive',
+  'ratebypass', 'pcm2cms', 'aitags', 'requiressl', 'ei', 'ip', 'initcwndbps',
 ];
+
+/**
+ * Endpoints that are never a download, however they are labelled.
+ *
+ * Subtitle, telemetry and API endpoints on streaming sites are frequently
+ * served as attachments, which would otherwise walk straight past the type
+ * check and fill the panel with 1 KB JSON files.
+ */
+const NOISE_PATHS = [
+  '/api/timedtext', '/timedtext',
+  '/youtubei/', '/api/stats', '/ptracking', '/generate_204', '/log_event',
+  '/gen_204', '/csi_204', '/qoe', '/atr', '/pagead/', '/doubleclick',
+];
+
+/** Content types that are never, on their own, something a user wants. */
+const NEVER_TYPES = [
+  'application/json', 'application/xml', 'text/', 'application/javascript',
+  'application/x-javascript', 'application/x-www-form-urlencoded',
+];
+
+/** Extensions that mean "this is part of a web page", not "this is a file". */
+const WEB_EXTENSIONS = ['json', 'html', 'htm', 'xml', 'js', 'mjs', 'css', 'map'];
+
+/** The filename a Content-Disposition claims, if it claims one. */
+export function dispositionFilename(header) {
+  if (!header) return null;
+  const ext = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(header);
+  if (ext?.[1]) {
+    try {
+      return decodeURIComponent(ext[1].trim());
+    } catch {
+      /* malformed encoding; fall through */
+    }
+  }
+  const plain = /filename\s*=\s*("([^"]*)"|([^;]+))/i.exec(header);
+  const raw = plain?.[2] ?? plain?.[3];
+  return raw ? raw.trim() : null;
+}
+
+function isNoiseUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    const path = u.pathname.toLowerCase();
+    return NOISE_PATHS.some((p) => path.includes(p));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `bytes 0-65535/189000000` -> 189000000.
+ *
+ * A streaming player fetches media in small ranged chunks, so Content-Length
+ * describes the chunk, not the file. Judging size by the chunk rejected every
+ * real video on YouTube for being "too small"; the total is only ever here.
+ */
+export function parseContentRangeTotal(header) {
+  if (!header) return null;
+  const m = /^bytes\s+(?:\d+-\d+|\*)\/(\d+)$/i.exec(String(header).trim());
+  if (!m) return null;
+  const total = Number(m[1]);
+  return Number.isSafeInteger(total) && total > 0 ? total : null;
+}
 
 /**
  * Key used to deduplicate detections.
@@ -49,6 +116,12 @@ const VOLATILE_PARAMS = [
 export function dedupeKey(rawUrl) {
   try {
     const u = new URL(rawUrl);
+
+    // When a URL identifies its rendition with an itag, that is the identity:
+    // everything else on a googlevideo URL is per-request noise.
+    const itag = u.searchParams.get('itag');
+    if (itag) return `${u.origin}${u.pathname}#itag=${itag}`;
+
     for (const p of VOLATILE_PARAMS) u.searchParams.delete(p);
     return `${u.origin}${u.pathname}?${u.searchParams.toString()}`;
   } catch {
@@ -106,19 +179,38 @@ export function shouldRecord({ url, contentType, size, contentDisposition }) {
   const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
   const ext = extensionOf(url);
 
+  if (isNoiseUrl(url)) return false;
+
   const manifest = isManifest(url, ct);
+  if (manifest) return true; // Manifests are tiny by design; no size floor.
+
   const typeMatch = MEDIA_TYPES.some((t) => ct.startsWith(t));
   const extMatch = MEDIA_EXTENSIONS.includes(ext) || ARCHIVE_EXTENSIONS.includes(ext);
   const attachment = (contentDisposition ?? '').toLowerCase().includes('attachment');
 
-  if (!manifest && !typeMatch && !extMatch && !attachment) return false;
+  const neverType = NEVER_TYPES.some((t) => ct.startsWith(t));
 
-  // Manifests are tiny by design, so the size floor must never apply to them.
-  if (manifest) return true;
+  // An attachment used to be admitted unconditionally, before any type check,
+  // so subtitle and API endpoints — which are served that way — filled the
+  // panel with 1 KB JSON files while the actual video was nowhere in it.
+  //
+  // The signal that separates the two is not the content type: a CSV export is
+  // `text/csv` and is a perfectly real download. It is whether the response
+  // names a file. A genuine attachment says `filename="report.csv"`; an API
+  // endpoint dressed as one names nothing, or names a web document.
+  if (attachment) {
+    const named = dispositionFilename(contentDisposition);
+    const namedExt = named && named.includes('.') ? named.split('.').pop().toLowerCase() : '';
+    if (namedExt) return !WEB_EXTENSIONS.includes(namedExt);
+    return !neverType;
+  }
 
-  // An attachment is an explicit download regardless of how small it is.
-  if (attachment) return true;
+  if (neverType && !extMatch) return false;
+  if (!typeMatch && !extMatch) return false;
 
+  // `size` must be the size of the FILE. The caller resolves it from
+  // Content-Range when the response is a range, because Content-Length then
+  // describes only the chunk.
   if (size !== null && size !== undefined && size < MIN_MEDIA_BYTES) return false;
   return true;
 }

@@ -13,6 +13,7 @@ import {
   MEDIA_EXTENSIONS,
   ARCHIVE_EXTENSIONS,
   shouldRecord,
+  parseContentRangeTotal,
   addDetection,
   clearDetections,
   getDetections,
@@ -42,7 +43,14 @@ async function recordIfMedia(details) {
   );
 
   const contentType = (headers['content-type'] ?? '').split(';')[0].trim();
-  const size = headers['content-length'] ? Number(headers['content-length']) : null;
+
+  // Content-Length describes this response; on a ranged request that is one
+  // chunk of the file, not the file. Streaming players fetch media in small
+  // ranges, so judging by Content-Length rejected every real video for being
+  // too small. Content-Range carries the only true total.
+  const total = parseContentRangeTotal(headers['content-range']);
+  const length = headers['content-length'] ? Number(headers['content-length']) : null;
+  const size = total ?? length;
 
   if (!shouldRecord({
     url: details.url,

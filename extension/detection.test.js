@@ -9,6 +9,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   shouldRecord,
+  parseContentRangeTotal,
   dedupeKey,
   kindOf,
   isManifest,
@@ -206,5 +207,173 @@ describe('url parsing', () => {
 
   test('filenameOf falls back for a bare origin', () => {
     assert.equal(filenameOf('https://x.test/'), 'download');
+  });
+});
+
+/**
+ * Regression suite built from the traffic a real YouTube watch page produces.
+ *
+ * The panel there showed three 1 KB JSON files and no video at all: subtitle
+ * endpoints walked past the type check because they are served as attachments,
+ * and every real stream was rejected for being "too small" because its
+ * Content-Length describes one range, not the file.
+ */
+describe('YouTube watch page', () => {
+  const VIDEO = 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=137&mime=video%2Fmp4&range=0-65535&rn=12&cpn=abc';
+  const AUDIO = 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=140&mime=audio%2Fmp4&range=0-65535&rn=13&cpn=abc';
+  const TIMEDTEXT = 'https://www.youtube.com/api/timedtext?v=pNrhAv1QC1Q&fmt=json3';
+  const PLAYER_API = 'https://www.youtube.com/youtubei/v1/player?key=AIza';
+
+  test('records a ranged video chunk using the total from Content-Range', () => {
+    assert.equal(
+      shouldRecord({
+        url: VIDEO,
+        contentType: 'video/mp4',
+        // The file is 189 MB; this response carries 64 KB of it.
+        size: parseContentRangeTotal('bytes 0-65535/189000000'),
+      }),
+      true,
+    );
+  });
+
+  test('a ranged chunk judged by Content-Length alone would be rejected', () => {
+    // Documents precisely why the Content-Range lookup exists: this is what
+    // the old code passed in, and it is below the size floor.
+    assert.equal(shouldRecord({ url: VIDEO, contentType: 'video/mp4', size: 65536 }), false);
+  });
+
+  test('records the audio rendition too', () => {
+    assert.equal(
+      shouldRecord({
+        url: AUDIO,
+        contentType: 'audio/mp4',
+        size: parseContentRangeTotal('bytes 0-65535/3800000'),
+      }),
+      true,
+    );
+  });
+
+  test('rejects the subtitle endpoint even though it is an attachment', () => {
+    // Exactly the "timedtext, JSON file, 1 KB" rows.
+    assert.equal(
+      shouldRecord({
+        url: TIMEDTEXT,
+        contentType: 'application/json; charset=utf-8',
+        size: 1024,
+        contentDisposition: 'attachment',
+      }),
+      false,
+    );
+  });
+
+  test('rejects the player API endpoint', () => {
+    assert.equal(
+      shouldRecord({ url: PLAYER_API, contentType: 'application/json', size: 240000 }),
+      false,
+    );
+  });
+
+  test('rejects telemetry beacons', () => {
+    for (const url of [
+      'https://www.youtube.com/api/stats/qoe?event=streamingstats',
+      'https://www.youtube.com/generate_204',
+      'https://www.youtube.com/ptracking?video_id=x',
+      'https://googleads.g.doubleclick.net/pagead/id',
+    ]) {
+      assert.equal(shouldRecord({ url, contentType: 'application/json', size: 0 }), false, url);
+    }
+  });
+
+  test('every chunk of one rendition collapses to a single entry', () => {
+    // The player issues these continuously while the video plays.
+    const chunks = [
+      `${VIDEO}`,
+      VIDEO.replace('range=0-65535', 'range=65536-131071').replace('rn=12', 'rn=14'),
+      VIDEO.replace('range=0-65535', 'range=900000-999999').replace('rn=12', 'rn=57'),
+    ];
+    const keys = new Set(chunks.map(dedupeKey));
+    assert.equal(keys.size, 1, `expected one entry, got ${[...keys].join(' | ')}`);
+  });
+
+  test('different renditions stay separate', () => {
+    assert.notEqual(dedupeKey(VIDEO), dedupeKey(AUDIO));
+    assert.notEqual(dedupeKey(VIDEO), dedupeKey(VIDEO.replace('itag=137', 'itag=22')));
+  });
+});
+
+describe('parseContentRangeTotal', () => {
+  test('reads the total, not the range', () => {
+    assert.equal(parseContentRangeTotal('bytes 0-65535/189000000'), 189000000);
+    assert.equal(parseContentRangeTotal('bytes 100-200/5000'), 5000);
+  });
+
+  test('returns null for an unknown or malformed total', () => {
+    assert.equal(parseContentRangeTotal('bytes 0-99/*'), null);
+    assert.equal(parseContentRangeTotal('nonsense'), null);
+    assert.equal(parseContentRangeTotal(undefined), null);
+    assert.equal(parseContentRangeTotal(null), null);
+  });
+});
+
+describe('attachments still work for real downloads', () => {
+  test('a CSV export is still offered', () => {
+    // The attachment rule exists for this; it just must not admit JSON APIs.
+    assert.equal(
+      shouldRecord({
+        url: 'https://app.example.com/export.csv',
+        contentType: 'text/csv',
+        size: 40,
+        contentDisposition: 'attachment; filename="report.csv"',
+      }),
+      true,
+    );
+  });
+
+  test('an API response dressed as an attachment is not', () => {
+    // No filename to claim: this is an endpoint, not a file.
+    assert.equal(
+      shouldRecord({
+        url: 'https://app.example.com/api/session',
+        contentType: 'application/json',
+        size: 900,
+        contentDisposition: 'attachment',
+      }),
+      false,
+    );
+  });
+
+  test('an attachment naming a web document is not', () => {
+    assert.equal(
+      shouldRecord({
+        url: 'https://app.example.com/api/dump',
+        contentType: 'application/json',
+        size: 900,
+        contentDisposition: 'attachment; filename="payload.json"',
+      }),
+      false,
+    );
+  });
+
+  test('an unnamed attachment of a real media type still is', () => {
+    assert.equal(
+      shouldRecord({
+        url: 'https://cdn.example.com/stream',
+        contentType: 'video/mp4',
+        size: 900,
+        contentDisposition: 'attachment',
+      }),
+      true,
+    );
+  });
+
+  test('an installer served as octet-stream is still offered', () => {
+    assert.equal(
+      shouldRecord({
+        url: 'https://example.com/tool.dmg',
+        contentType: 'application/octet-stream',
+        size: 90 * 1024 * 1024,
+      }),
+      true,
+    );
   });
 });

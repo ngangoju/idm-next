@@ -49,13 +49,17 @@
        * panel can be developed and reviewed in a plain browser. An unpacked
        * extension is the real test; this is for looking at it.
        */
+      // Shaped like what the background worker keeps after filtering a real
+      // YouTube watch page: one entry per rendition, sizes taken from
+      // Content-Range, and none of the timedtext/telemetry noise.
+      const GV = 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606';
       const FIXTURE = [
-        { url: 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=137&mime=video%2Fmp4', kind: 'video', size: 189_000_000, title: 'Streets of Rage 2 Stage 1', isManifest: false, contentType: 'video/mp4' },
-        { url: 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=22&mime=video%2Fmp4',  kind: 'video', size: 69_509_000, title: 'Streets of Rage 2 Stage 1', isManifest: false, contentType: 'video/mp4' },
-        { url: 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=18&mime=video%2Fmp4',  kind: 'video', size: 24_100_000, title: 'Streets of Rage 2 Stage 1', isManifest: false, contentType: 'video/mp4' },
-        { url: 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=133&mime=video%2Fmp4', kind: 'video', size: 8_900_000,  title: 'Streets of Rage 2 Stage 1', isManifest: false, contentType: 'video/mp4' },
-        { url: 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=160&mime=video%2Fmp4', kind: 'video', size: 4_200_000,  title: 'Streets of Rage 2 Stage 1', isManifest: false, contentType: 'video/mp4' },
-        { url: 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=140&mime=audio%2Fmp4', kind: 'audio', size: 3_800_000,  title: 'Streets of Rage 2 Stage 1', isManifest: false, contentType: 'audio/mp4' },
+        { url: `${GV}&itag=137&mime=video%2Fmp4`, kind: 'video', size: 189_000_000, title: 'Director Musinga - Live Session', isManifest: false, contentType: 'video/mp4' },
+        { url: `${GV}&itag=22&mime=video%2Fmp4`,  kind: 'video', size: 69_509_000,  title: 'Director Musinga - Live Session', isManifest: false, contentType: 'video/mp4' },
+        { url: `${GV}&itag=18&mime=video%2Fmp4`,  kind: 'video', size: 24_100_000,  title: 'Director Musinga - Live Session', isManifest: false, contentType: 'video/mp4' },
+        { url: `${GV}&itag=133&mime=video%2Fmp4`, kind: 'video', size: 8_900_000,   title: 'Director Musinga - Live Session', isManifest: false, contentType: 'video/mp4' },
+        { url: `${GV}&itag=160&mime=video%2Fmp4`, kind: 'video', size: 4_200_000,   title: 'Director Musinga - Live Session', isManifest: false, contentType: 'video/mp4' },
+        { url: `${GV}&itag=140&mime=audio%2Fmp4`, kind: 'audio', size: 3_800_000,   title: 'Director Musinga - Live Session', isManifest: false, contentType: 'audio/mp4' },
       ];
 
       const log = (msg) => {
