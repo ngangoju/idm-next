@@ -6,3 +6,4 @@ out/
 *.part
 *.idmpart.json
 .vite/
+dist/

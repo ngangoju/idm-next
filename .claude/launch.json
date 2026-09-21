@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "idm-next-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:renderer", "--prefix", "app"],
+      "port": 5473
+    }
+  ]
+}
