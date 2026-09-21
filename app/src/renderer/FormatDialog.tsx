@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 interface YtFormat {
   id: string;
   ext: string;
-  resolution: string;
+  resolution: string | null;
   fps: number | null;
   vcodec: string | null;
   acodec: string | null;
@@ -90,15 +90,15 @@ export function FormatDialog({
                     className="format"
                     onClick={() => onPick(f.id, state.data.title)}
                   >
-                    <span className="res">{f.resolution}</span>
+                    <span className="res">{describeQuality(f)}</span>
                     <span className="codec">
                       {[f.vcodec, f.acodec].filter(Boolean).join(' + ') || 'unknown codec'}
                       {f.fps ? ` · ${f.fps}fps` : ''}
                       {f.note ? ` · ${f.note}` : ''}
                     </span>
                     <span className="size">{f.filesize ? bytes(f.filesize) : '—'}</span>
-                    <span className={`proto ${isDirect(f) ? 'direct' : ''}`}>
-                      {isDirect(f) ? 'direct' : f.protocol}
+                    <span className={isDirect(f) ? 'proto direct' : 'proto'}>
+                      {describeProtocol(f.protocol)}
                     </span>
                   </button>
                 ))}
@@ -128,6 +128,29 @@ export function FormatDialog({
 
 function isDirect(f: YtFormat): boolean {
   return f.protocol === 'https' || f.protocol === 'http';
+}
+
+/**
+ * What the user should see in the quality column. Only claim "audio only" when
+ * the format actually says there is no video track.
+ */
+function describeQuality(f: YtFormat): string {
+  if (f.resolution) return f.resolution;
+  if (f.vcodec) return 'Video';
+  if (f.acodec) return 'Audio only';
+  return 'Unknown';
+}
+
+/**
+ * Protocol names are an implementation detail; what matters to the user is
+ * which transport carries the download, and "direct" means our own segmented
+ * engine with resume.
+ */
+function describeProtocol(protocol: string): string {
+  if (protocol === 'https' || protocol === 'http') return 'Direct';
+  if (protocol.startsWith('m3u8')) return 'HLS';
+  if (protocol.includes('dash')) return 'DASH';
+  return protocol;
 }
 
 function bytes(n: number): string {

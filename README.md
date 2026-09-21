@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 124 tests across core, app and extension
+npm test           # 130 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 ```
@@ -81,6 +81,7 @@ The local control server is not "just localhost":
 | `Host` must be loopback verbatim | DNS rebinding |
 | POST-only mutations | `<img src>` triggering actions |
 | Bounded body drain → 413 | Memory exhaustion, and keep-alive desync |
+| Preflight answered, never trusted | A permissive OPTIONS that authorizes nothing |
 
 Cookies captured for a download are held in memory for that download only and
 never written to disk.

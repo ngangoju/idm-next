@@ -35,6 +35,12 @@ export interface ServerOptions {
   allowedExtensionIds: string[];
   /** Secret handed to the renderer over IPC; grants access regardless of origin. */
   authToken: string;
+  /**
+   * Extra origins to accept, for running the renderer against a Vite dev
+   * server. Only ever populated from IDM_DEV_ORIGIN, which no packaged build
+   * sets — a release accepts the extension and the token, nothing else.
+   */
+  devOrigins?: string[];
   version?: string;
 }
 
@@ -69,13 +75,14 @@ export class ControlServer {
     this.port = opts.port ?? DEFAULT_PORT;
     this.authToken = opts.authToken;
     this.version = opts.version ?? '0.1.0';
-    this.allowedOrigins = new Set(
-      opts.allowedExtensionIds.flatMap((id) => [
+    this.allowedOrigins = new Set([
+      ...opts.allowedExtensionIds.flatMap((id) => [
         `chrome-extension://${id}`,
         // Brave uses the chrome-extension scheme too; listed for clarity.
         `moz-extension://${id}`,
       ]),
-    );
+      ...(opts.devOrigins ?? []),
+    ]);
   }
 
   get address(): string {
@@ -150,6 +157,25 @@ export class ControlServer {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const origin = req.headers.origin;
+
+    // Answer the preflight before authenticating, because a preflight cannot
+    // be authenticated: the browser sends it without the custom header, so
+    // `x-idm-token` is never present on an OPTIONS. Rejecting it here meant
+    // every renderer fetch failed before it was ever sent — the UI only looked
+    // alive because downloads arrive over the WebSocket, which has no
+    // preflight. A permissive preflight authorizes nothing; the real request
+    // that follows is still fully checked.
+    if (req.method === 'OPTIONS') {
+      res.setHeader('Access-Control-Allow-Origin', origin ?? '*');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type, x-idm-token');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Max-Age', '600');
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     const denied = this.reject(req);
     if (denied !== null) {
       res.writeHead(403, { 'content-type': 'application/json' });
@@ -157,16 +183,14 @@ export class ControlServer {
       return;
     }
 
-    const origin = req.headers.origin;
-    if (origin && this.allowedOrigins.has(origin)) {
+    // The request authenticated, so the browser may read the response. That
+    // includes `Origin: null` from a packaged file:// renderer holding a valid
+    // token.
+    if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Headers', 'content-type');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type, x-idm-token');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    }
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
+      res.setHeader('Vary', 'Origin');
     }
 
     const url = new URL(req.url ?? '/', this.address);
@@ -264,6 +288,7 @@ export class ControlServer {
     this.manager.on('failed', ({ id, error }) =>
       this.broadcast({ type: 'download-error', id, error }),
     );
+    this.manager.on('removed', ({ id }) => this.broadcast({ type: 'download-removed', id }));
     this.manager.on('settings', (settings) => this.broadcast({ type: 'settings', settings }));
     this.manager.on('progress', (batch) =>
       this.broadcast({

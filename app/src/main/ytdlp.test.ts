@@ -98,6 +98,15 @@ describe('parseExtraction', () => {
     assert.equal(e.formats.at(-1)?.id, '18');
   });
 
+  test('reports no resolution rather than guessing "audio only"', () => {
+    // A bare HLS media playlist carries no dimensions. Calling that "audio
+    // only" mislabelled a 720p video in the picker.
+    const e = parseExtraction(
+      JSON.stringify({ formats: [{ format_id: 'x', protocol: 'm3u8_native', url: 'https://x/a.m3u8' }] }),
+    );
+    assert.equal(e.formats[0]?.resolution, null);
+  });
+
   test('normalizes resolution and treats "none" codecs as absent', () => {
     const e = parseExtraction(sample);
     const f1080 = e.formats.find((f) => f.id === '137');

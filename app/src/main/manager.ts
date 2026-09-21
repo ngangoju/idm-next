@@ -5,9 +5,18 @@
  */
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { mkdir, readdir, rename, rm } from 'node:fs/promises';
 import { exec } from 'node:child_process';
-import { Download, TokenBucket, hashFile, probe, makeDispatcher, fileSize } from '@idm-next/core';
+import {
+  Download,
+  TokenBucket,
+  hashFile,
+  probe,
+  makeDispatcher,
+  fileSize,
+  uniquePath,
+} from '@idm-next/core';
 import type { ProgressSnapshot } from '@idm-next/core';
 import { Store } from './store.ts';
 import { YtDlp, remuxIfMislabelled, type Extraction } from './ytdlp.ts';
@@ -26,6 +35,7 @@ export interface ManagerEvents {
   progress: [DownloadRecord[]];
   done: [DownloadRecord];
   failed: [{ id: string; error: string }];
+  removed: [{ id: string }];
   'queue-drained': [Queue];
   settings: [Settings];
 }
@@ -214,9 +224,16 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
     this.setStatus(record.id, 'downloading');
 
     try {
-      const { filePath } = await this.ytdlp.download({
+      // Download into a private staging directory, then move the result into
+      // place under a collision-free name. yt-dlp picks the filename itself
+      // (it only learns the extension mid-download), so without this a second
+      // download of the same stream silently overwrites the first.
+      const staging = join(record.destDir, `.idm-staging-${record.id}`);
+      await mkdir(staging, { recursive: true });
+
+      const { filePath: staged } = await this.ytdlp.download({
         url: record.url,
-        destDir: record.destDir,
+        destDir: staging,
         ...(record.formatId ? { formatId: record.formatId } : {}),
         signal: controller.signal,
         onProgress: (p) => {
@@ -235,28 +252,39 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
 
       this.external.delete(record.id);
 
-      if (filePath) {
-        await remuxIfMislabelled(
-          filePath,
-          this.store.settings.ffmpegPath,
-          this.store.settings.ffmpegPath.replace(/ffmpeg$/, 'ffprobe'),
-        ).catch(() => undefined);
+      // --print after_move can stay silent (a skipped or already-present file),
+      // so fall back to whatever actually landed in staging rather than
+      // reporting a completed download with no file and no size.
+      let produced = staged;
+      if (!produced) {
+        const entries = await readdir(staging).catch(() => [] as string[]);
+        const first = entries.find((e) => !e.startsWith('.'));
+        if (first) produced = join(staging, first);
       }
+
+      if (!produced) throw new Error('yt-dlp produced no file');
+
+      await remuxIfMislabelled(
+        produced,
+        this.store.settings.ffmpegPath,
+        this.store.settings.ffmpegPath.replace(/ffmpeg$/, 'ffprobe'),
+      ).catch(() => undefined);
+
+      const finalPath = await uniquePath(join(record.destDir, basename(produced)));
+      await rename(produced, finalPath);
+      await rm(staging, { recursive: true, force: true }).catch(() => undefined);
 
       // A short download can finish before yt-dlp emits a single progress tick,
       // which would leave the record claiming 0 bytes. Take the truth from the
       // file that actually landed.
-      let finalSize: number | null = null;
-      if (filePath) finalSize = await fileSize(filePath).catch(() => null);
+      const finalSize = await fileSize(finalPath).catch(() => null);
 
       this.store.update((s) => {
         const d = s.downloads.find((x) => x.id === record.id);
         if (!d) return;
         d.status = 'completed';
-        if (filePath) {
-          d.filePath = filePath;
-          d.filename = filePath.split('/').pop() ?? d.filename;
-        }
+        d.filePath = finalPath;
+        d.filename = basename(finalPath);
         if (finalSize !== null) {
           d.downloaded = finalSize;
           d.totalSize = finalSize;
@@ -275,6 +303,11 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       this.pumpQueue();
     } catch (err) {
       this.external.delete(record.id);
+      await rm(join(record.destDir, `.idm-staging-${record.id}`), {
+        recursive: true,
+        force: true,
+      }).catch(() => undefined);
+
       if (controller.signal.aborted) {
         this.setStatus(record.id, 'paused');
         return;
@@ -312,6 +345,8 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       s.downloads = s.downloads.filter((d) => d.id !== id);
       for (const q of s.queues) q.items = q.items.filter((i) => i !== id);
     });
+    // Without this every other client keeps showing the row forever.
+    this.emit('removed', { id });
     this.pumpQueue();
   }
 

@@ -21,8 +21,8 @@ import { once } from 'node:events';
 export interface YtFormat {
   id: string;
   ext: string;
-  /** e.g. "1920x1080" or "audio only". */
-  resolution: string;
+  /** e.g. "1920x1080" or "720p"; null when the format does not say. */
+  resolution: string | null;
   fps: number | null;
   vcodec: string | null;
   acodec: string | null;
@@ -110,9 +110,12 @@ function toFormat(raw: Record<string, unknown>): YtFormat {
   return {
     id: String(raw['format_id'] ?? ''),
     ext: str(raw['ext']) ?? 'bin',
+    // A bare HLS media playlist carries no dimensions at all. Defaulting that
+    // to "audio only" mislabels a 720p video, so report the absence honestly
+    // and let the caller decide what to show.
     resolution:
       str(raw['resolution']) ??
-      (width && height ? `${width}x${height}` : height ? `${height}p` : 'audio only'),
+      (width && height ? `${width}x${height}` : height ? `${height}p` : null),
     fps: num(raw['fps']),
     vcodec: str(raw['vcodec']) === 'none' ? null : str(raw['vcodec']),
     acodec: str(raw['acodec']) === 'none' ? null : str(raw['acodec']),

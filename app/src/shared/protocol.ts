@@ -144,6 +144,7 @@ export type ServerEvent =
   | { type: 'download-added'; download: DownloadRecord }
   | { type: 'download-done'; download: DownloadRecord }
   | { type: 'download-error'; id: string; error: string }
+  | { type: 'download-removed'; id: string }
   | { type: 'settings'; settings: Settings }
   | { type: 'queues'; queues: Queue[] };
 

@@ -150,6 +150,36 @@ describe('downloading', () => {
   });
 });
 
+describe('repeat downloads of the same stream', () => {
+  test('do not overwrite each other', async () => {
+    // yt-dlp names the file itself, so without staging + uniquePath a second
+    // download of the same URL silently replaces the first. This is exactly
+    // what produced three identical rows pointing at one file.
+    const { manager, dir } = await freshManager();
+    const { mkdir, writeFile, readdir } = await import('node:fs/promises');
+    const { uniquePath } = await import('@idm-next/core');
+    const { join: j } = await import('node:path');
+
+    const dest = j(dir, 'dl', 'video');
+    await mkdir(dest, { recursive: true });
+
+    // Stand in for three yt-dlp runs that each produce "stream.mp4".
+    const paths: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const p = await uniquePath(j(dest, 'stream.mp4'));
+      await writeFile(p, `run ${i}`);
+      paths.push(p);
+    }
+
+    assert.equal(new Set(paths).size, 3, 'each run must get its own path');
+    assert.deepEqual(
+      (await readdir(dest)).sort(),
+      ['stream (1).mp4', 'stream (2).mp4', 'stream.mp4'],
+    );
+    await manager.shutdown();
+  });
+});
+
 describe('concurrency', () => {
   test('never runs more than maxConcurrentDownloads at once', async () => {
     const fx = await startFixture({

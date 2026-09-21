@@ -65,6 +65,8 @@ async function main(): Promise<void> {
     port: DEFAULT_PORT,
     allowedExtensionIds: ALLOWED_EXTENSION_IDS,
     authToken: AUTH_TOKEN,
+    // Set only by the dev script, never by a packaged build.
+    ...(process.env.IDM_DEV_ORIGIN ? { devOrigins: [process.env.IDM_DEV_ORIGIN] } : {}),
     version: app.getVersion(),
   });
 
@@ -96,7 +98,12 @@ function createWindow(): void {
     minWidth: 860,
     minHeight: 480,
     title: 'IDM-Next',
-    backgroundColor: '#14161a',
+    backgroundColor: '#0b0d11',
+    // Frameless with inset traffic lights: the sidebar runs to the top edge
+    // and the app stops looking like a web page in a window. The renderer
+    // reserves space for the lights and marks its own drag regions.
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 14, y: 14 },
     webPreferences: {
       preload: join(appDir, '../preload/index.cjs'),
       contextIsolation: true,

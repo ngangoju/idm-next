@@ -130,6 +130,40 @@ describe('access control', () => {
     assert.equal(outcome, 'open');
   });
 
+  test('answers the preflight for the token header', async () => {
+    // Regression: the renderer sends `x-idm-token`, which is not a CORS-simple
+    // header, so every call is preflighted. The preflight carries no token, so
+    // authenticating it rejected it — and with it every renderer fetch in the
+    // packaged app. Only the WebSocket survived, which hid the failure.
+    const res = await fetch(`${base}/settings`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'null',
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Headers': 'x-idm-token',
+      },
+    });
+    assert.equal(res.status, 204);
+    assert.match(res.headers.get('access-control-allow-headers') ?? '', /x-idm-token/);
+  });
+
+  test('a preflight authorizes nothing on its own', async () => {
+    // The permissive preflight must not become a way in: the real request is
+    // still checked.
+    const res = await fetch(`${base}/settings`, { headers: { Origin: 'null' } });
+    assert.equal(res.status, 403);
+  });
+
+  test('echoes the allow-origin header to a token-authenticated caller', async () => {
+    // A packaged renderer loads from file:// and reports `Origin: null`; it
+    // must still be allowed to read the response body.
+    const res = await fetch(`${base}/settings`, {
+      headers: { Origin: 'null', 'x-idm-token': TOKEN },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('access-control-allow-origin'), 'null');
+  });
+
   test('rejects a web page origin', async () => {
     // The case that matters: any site the user visits must not drive this.
     const res = await fetch(`${base}/health`, { headers: { Origin: 'https://evil.example' } });
@@ -159,6 +193,41 @@ describe('access control', () => {
       ws.on('close', () => resolve('rejected'));
     });
     assert.equal(outcome, 'rejected');
+  });
+});
+
+describe('removal is broadcast', () => {
+  test('cancelling a download tells every connected client', async () => {
+    // Without this, a row cancelled from one window (or the tray) lingers
+    // forever in every other client, which is what produced a list of stale
+    // paused rows against a set of live downloads.
+    const { WebSocket } = await import('ws');
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/?token=${TOKEN}`);
+    await new Promise((r) => ws.on('open', r));
+
+    const events: { type: string; id?: string }[] = [];
+    ws.on('message', (raw: Buffer) => events.push(JSON.parse(raw.toString())));
+
+    const added = (await (
+      await fetch(`${base}/downloads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://x.test/thing.zip', startPaused: true }),
+      })
+    ).json()) as { download: { id: string } };
+
+    await fetch(`${base}/downloads/cancel`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: added.download.id }),
+    });
+
+    await new Promise((r) => setTimeout(r, 150));
+    ws.close();
+
+    const removal = events.find((e) => e.type === 'download-removed');
+    assert.ok(removal, `no removal event in ${JSON.stringify(events.map((e) => e.type))}`);
+    assert.equal(removal.id, added.download.id);
   });
 });
 
