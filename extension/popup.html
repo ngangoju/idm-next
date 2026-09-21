@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        width: 380px; margin: 0; padding: 0;
+        background: #14161a; color: #e6e9ef;
+        font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      header {
+        display: flex; align-items: center; gap: 8px;
+        padding: 11px 13px; border-bottom: 1px solid #2b3038;
+      }
+      .brand { font-weight: 650; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: #e0a33e; }
+      .dot.ok { background: #38c172; }
+      .status { margin-left: auto; font-size: 11px; color: #8d95a3; }
+      ul { list-style: none; margin: 0; padding: 0; max-height: 380px; overflow-y: auto; }
+      li {
+        display: flex; align-items: center; gap: 9px;
+        padding: 9px 13px; border-bottom: 1px solid #21252c;
+      }
+      .kind {
+        font-size: 9.5px; text-transform: uppercase; letter-spacing: .06em;
+        padding: 2px 6px; border-radius: 4px; background: #21252c; color: #8d95a3; flex: none;
+      }
+      .kind.video { color: #4c8dff; }
+      .kind.audio { color: #38c172; }
+      .kind.stream { color: #e0a33e; }
+      .meta { flex: 1; min-width: 0; }
+      .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .sub { font-size: 11px; color: #8d95a3; }
+      button {
+        font: inherit; font-size: 12px; color: #fff; background: #4c8dff;
+        border: none; border-radius: 6px; padding: 5px 10px; cursor: pointer; flex: none;
+      }
+      button:disabled { background: #38c172; cursor: default; }
+      .empty { padding: 26px 16px; text-align: center; color: #8d95a3; font-size: 12px; line-height: 1.6; }
+      footer { padding: 9px 13px; border-top: 1px solid #2b3038; display: flex; gap: 8px; }
+      footer button { flex: 1; background: #21252c; }
+      .warn { padding: 9px 13px; background: #3a2f1e; color: #e0a33e; font-size: 11.5px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="dot" id="dot"></span>
+      <span class="brand">IDM-Next</span>
+      <span class="status" id="status">checking…</span>
+    </header>
+    <div id="warn" class="warn" hidden>
+      The IDM-Next app is not running, so downloads cannot be started.
+    </div>
+    <ul id="list"></ul>
+    <div class="empty" id="empty" hidden>
+      Nothing detected on this page yet.<br />Start playing a video, or reload the page.
+    </div>
+    <footer>
+      <button id="all">Download all</button>
+      <button id="page">Send page to IDM-Next</button>
+    </footer>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

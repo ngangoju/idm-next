@@ -28,8 +28,10 @@ const appDir: string = __dirname;
  * it is read from an env var during development and baked in for a release.
  */
 const ALLOWED_EXTENSION_IDS = [
+  // Deterministic: the extension's manifest pins a public "key", so Chrome and
+  // Brave both derive this same id whether it is loaded unpacked or installed.
+  'nillkncbloeeggoephkkfnafgdnknmel',
   process.env.IDM_EXTENSION_ID,
-  'idmnextidmnextidmnextidmnextidmn',
 ].filter((v): v is string => typeof v === 'string' && v.length > 0);
 
 let mainWindow: BrowserWindow | null = null;

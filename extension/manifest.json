@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "IDM-Next",
+  "version": "0.1.0",
+  "description": "Detects video, audio and downloadable files on any page and hands them to IDM-Next.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkjaQ5qUez9KKI2TK5CRJ2ekeMd9l0RZ5KD5zEv63XUoDVcWMWRpd8tWdHwprFK/I0yDJSjD5df7U+ILN94SRqr0qxIYWBmJlh3Dt3wvfHIp0dEpWsED0mUTATZQ9YJrEZ46Q7hgHeri+oCr9ZT6mdlkT5ndO5hS0z4jCse0MaFRHQwe15EFf9+3+RZ54RRB2GFHt19JrDbm0QmSFbhxO5ryw91pZ7RLgntI7NlYBsA3asv/YT4EX/m6/PubMhzq0NbH3WGoPelfhhMzYEx4lzQOJZmoeP4Akt+HxG+fBtl6DGpyfOU7QQUfb34JZAefjbcaNqln6ZCnIFagisComeQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "downloads",
+    "webRequest",
+    "storage",
+    "cookies",
+    "contextMenus",
+    "scripting",
+    "tabs",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "IDM-Next"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "icons": {}
+}

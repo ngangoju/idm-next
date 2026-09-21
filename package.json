@@ -3,11 +3,20 @@
   "private": true,
   "version": "0.1.0",
   "description": "A modern, cross-platform download manager with Chrome/Brave integration.",
-  "workspaces": ["core", "app"],
-  "engines": { "node": ">=22.18" },
+  "workspaces": [
+    "core",
+    "app",
+    "extension"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
-    "test": "npm run test -w core",
-    "typecheck": "npm run typecheck -w core"
+    "test": "npm test -w core && npm test -w app && npm test -w extension",
+    "typecheck": "npm run typecheck -w core && npm run typecheck -w app",
+    "start": "npm start -w app",
+    "dev": "npm run dev -w app",
+    "build": "npm run build -w app"
   },
   "license": "MIT"
 }
