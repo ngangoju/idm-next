@@ -19,9 +19,10 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 130 tests across core, app and extension
+npm test           # 131 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
+npm run bench -w core   # measure download throughput
 ```
 
 `yt-dlp` and `ffmpeg` are optional — without them direct file downloads work
@@ -52,11 +53,21 @@ fsynced before it is written so it can never claim bytes that are not on disk.
 On resume the server is re-probed and the ETag compared; a mismatch is surfaced
 rather than silently splicing two versions of a file together.
 
+**The floating panel.** A bar pinned over the player — "Download this video" —
+that opens a list of every variant found on the page, with "Download all" at the
+top, the way IDM's does. One click on the bar takes the highest quality; the
+caret opens the full list. Pages whose downloads are documents or archives get
+the same panel in the page corner instead.
+
+Quality labels are derived from whatever the page actually exposes: the
+`<video>` element's own height, a resolution in the URL, or — on YouTube, where
+every rendition comes from the same host — the `itag`, without which the list
+reads "MP4 file" five times over.
+
 **Media detection.** The extension watches response headers for video, audio,
-HLS and DASH content types, scans the DOM for `<video>`/`<audio>`, and puts a
-"Download this video" button on the player. Detections are deduplicated (a
-seeking player fires dozens of near-identical requests) and filtered by a size
-floor so ad beacons don't fill the list.
+HLS and DASH content types and scans the DOM for `<video>`/`<audio>`.
+Detections are deduplicated (a seeking player fires dozens of near-identical
+requests) and filtered by a size floor so ad beacons don't fill the list.
 
 **Download takeover that cannot lose a download.** `chrome.downloads.cancel()`
 is irreversible, and a signed or one-time URL 403s when replayed. So the
@@ -68,6 +79,30 @@ outcome, not a failure.
 auto-sorting, global and per-download speed caps, proxy support, cookie/referer
 passthrough, clipboard monitoring, checksum verification, a post-download
 command hook, and shutdown-when-the-queue-finishes.
+
+## Speed
+
+Multi-connection transfer is the whole point, and it scales close to linearly
+against a server that caps each connection — which is what real servers and CDNs
+do. Measured with `npm run bench -w core` on a 96 MB file, 6 MB/s per connection:
+
+| Connections | Throughput | vs 1 connection |
+|---|---|---|
+| 1 | 5.7 MB/s | 1.00× |
+| 4 | 22.6 MB/s | 3.92× |
+| 8 | 43.9 MB/s | 7.64× |
+| 16 | 75.8 MB/s | 13.2× |
+| 32 | 139.3 MB/s | 24.2× |
+
+Against an *unthrottled* server the engine sustains roughly 1 GB/s regardless of
+connection count, so its own overhead is far below any real network — the
+connection count is the lever, not the code.
+
+The default is 16, adjustable per download and in settings, with a ceiling of
+32. More is not always better: a server that objects returns `429`, and backing
+off one segment would not reduce the pressure while the other connections stay
+open. So a `429` or `503` also stops finished workers from opening new
+connections for a cooldown, letting concurrency shrink on its own and recover.
 
 ## Security
 

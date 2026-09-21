@@ -22,7 +22,7 @@ export function defaultSettings(): Settings {
   return {
     downloadDir: join(home, 'Downloads', 'IDM-Next'),
     categoryDirs: {},
-    defaultConnections: 8,
+    defaultConnections: 16,
     globalRateBps: 0,
     maxConcurrentDownloads: 4,
     clipboardMonitor: true,

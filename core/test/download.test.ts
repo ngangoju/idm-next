@@ -102,6 +102,35 @@ describe('failure recovery', () => {
   });
 });
 
+describe('server push-back', () => {
+  test('stops opening new connections after a 429, and still finishes', async () => {
+    // Backing off one segment does not reduce pressure when the other
+    // connections are still open, so a 429 also stops workers from stealing
+    // more work. The download must still complete.
+    const body = makeBody(6 * MB);
+    const fx = await startFixture({
+      body,
+      etag: '"v1"',
+      rateLimitFirst: 4,
+      retryAfter: '0',
+    });
+    const dest = await tempDir();
+    try {
+      const dl = new Download({ url: fx.url, destDir: dest, connections: 8 });
+      const done = once(dl, 'done');
+      const failed = once(dl, 'error').then(([e]) => {
+        throw e;
+      });
+      void dl.start();
+      await Promise.race([done, failed]);
+
+      assert.equal(await hashFile(dl.path), sha256(body));
+    } finally {
+      await fx.close();
+    }
+  });
+});
+
 describe('servers without range support', () => {
   test('degrades to a single stream instead of corrupting output', async () => {
     const body = makeBody(2 * MB);

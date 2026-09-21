@@ -32,6 +32,9 @@ import {
   type ProgressSnapshot,
 } from './types.ts';
 
+/** How long to stop adding connections after the server pushes back. */
+const THROTTLE_COOLDOWN_MS = 10_000;
+
 export interface DownloadEvents {
   progress: [ProgressSnapshot];
   done: [{ filePath: string }];
@@ -54,6 +57,15 @@ export class Download extends EventEmitter<DownloadEvents> {
   private lastError: string | undefined;
   private progressTimer: NodeJS.Timeout | null = null;
   private pausePromise: Promise<void> | null = null;
+  /**
+   * Until this timestamp, finished workers exit instead of stealing more work.
+   *
+   * A 429 means the server is objecting to how hard we are pushing it, and
+   * backing off a single segment does not reduce the pressure — the other
+   * connections are still open. Letting workers retire shrinks concurrency
+   * without restructuring the download, and it recovers on its own.
+   */
+  private throttledUntil = 0;
   private readonly retryPolicy: RetryPolicy;
 
   private readonly opts: DownloadOptions;
@@ -208,6 +220,10 @@ export class Download extends EventEmitter<DownloadEvents> {
 
       if (this.status !== 'downloading') return;
 
+      // While the server is pushing back, retire rather than opening another
+      // connection. Segments still in flight continue; we just stop adding.
+      if (Date.now() < this.throttledUntil) return;
+
       const stolen = sched.steal();
       current = stolen ? sched.segments.indexOf(stolen) : null;
       if (current !== null) sched.segments[current]!.active = true;
@@ -256,6 +272,10 @@ export class Download extends EventEmitter<DownloadEvents> {
           (res.headers['retry-after'] as string | undefined) ?? undefined,
         );
         if (ra !== null) err.retryAfterMs = ra;
+
+        if (res.statusCode === 429 || res.statusCode === 503) {
+          this.throttledUntil = Date.now() + Math.max(ra ?? 0, THROTTLE_COOLDOWN_MS);
+        }
         throw err;
       }
       throw new Error(`Unexpected status ${res.statusCode} for ranged request`);

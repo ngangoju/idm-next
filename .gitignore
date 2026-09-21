@@ -7,3 +7,4 @@ out/
 *.idmpart.json
 .vite/
 dist/
+release/

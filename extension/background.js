@@ -72,21 +72,37 @@ async function recordIfMedia(details) {
     isManifest: manifest,
     detectedAt: Date.now(),
   });
+  notifyTab(details.tabId);
+}
+
+/**
+ * Tell the page's panel its list changed. The content script cannot poll for
+ * this — the worker owns the registry — and without it the panel would show
+ * whatever was known at load time and never update as renditions appear.
+ */
+function notifyTab(tabId) {
+  chrome.tabs.sendMessage(tabId, { type: 'media-updated' }).catch(() => {
+    // No content script on this tab (a PDF viewer, a chrome:// page); fine.
+  });
 }
 
 /** Detections reported by the content script's DOM scan. */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'media-found' && sender.tab?.id !== undefined) {
-    void addDetection(sender.tab.id, {
+    const tabId = sender.tab.id;
+    void addDetection(tabId, {
       url: msg.url,
       kind: msg.kind ?? kindOf(msg.url, null),
       contentType: null,
       size: null,
+      // The <video> element's own height is the only trustworthy quality
+      // signal for a plain source; everything else is inferred from the URL.
+      ...(msg.height ? { height: msg.height } : {}),
       title: msg.title ?? filenameOf(msg.url),
       pageUrl: sender.tab.url ?? '',
       isManifest: isManifest(msg.url, null),
       detectedAt: Date.now(),
-    });
+    }).then(() => notifyTab(tabId));
     return false;
   }
 

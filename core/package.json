@@ -6,7 +6,8 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": {
     "test": "node --test 'test/*.test.ts'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bench": "node bench/throughput.mjs"
   },
   "dependencies": {
     "undici": "^8.10.2"
