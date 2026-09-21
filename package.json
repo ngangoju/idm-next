@@ -1,0 +1,13 @@
+{
+  "name": "idm-next",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A modern, cross-platform download manager with Chrome/Brave integration.",
+  "workspaces": ["core", "app"],
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "test": "npm run test -w core",
+    "typecheck": "npm run typecheck -w core"
+  },
+  "license": "MIT"
+}
