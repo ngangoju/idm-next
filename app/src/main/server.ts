@@ -184,6 +184,8 @@ export class ControlServer {
             return json(res, 200, { queues: this.manager.queues });
           case '/settings':
             return json(res, 200, { settings: this.manager.settings });
+          case '/ytdlp':
+            return json(res, 200, await this.manager.ytdlpStatus());
           default:
             return json(res, 404, { error: 'not found' });
         }
@@ -198,6 +200,17 @@ export class ControlServer {
           const { url: target, headers } = body as { url?: string; headers?: Record<string, string> };
           if (!isHttpUrl(target)) return json(res, 400, { error: 'bad url' });
           return json(res, 200, await this.manager.probeUrl(target, headers));
+        }
+        case '/extract': {
+          const { url: target } = body as { url?: string };
+          if (!isHttpUrl(target)) return json(res, 400, { error: 'bad url' });
+          try {
+            return json(res, 200, await this.manager.extract(target));
+          } catch (err) {
+            return json(res, 502, {
+              error: err instanceof Error ? err.message : 'extraction failed',
+            });
+          }
         }
         case '/downloads': {
           const reqBody = body as AddDownloadRequest;

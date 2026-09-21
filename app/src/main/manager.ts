@@ -7,9 +7,10 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { exec } from 'node:child_process';
-import { Download, TokenBucket, hashFile, probe, makeDispatcher } from '@idm-next/core';
+import { Download, TokenBucket, hashFile, probe, makeDispatcher, fileSize } from '@idm-next/core';
 import type { ProgressSnapshot } from '@idm-next/core';
 import { Store } from './store.ts';
+import { YtDlp, remuxIfMislabelled, type Extraction } from './ytdlp.ts';
 import {
   categoryFor,
   type AddDownloadRequest,
@@ -35,11 +36,26 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
   private readonly globalBucket: TokenBucket;
   private progressTimer: NodeJS.Timeout | null = null;
   private dirtyProgress = new Set<string>();
+  /** Live yt-dlp children, so they can be stopped on pause/cancel. */
+  private readonly external = new Map<string, AbortController>();
 
   constructor(store: Store) {
     super();
     this.store = store;
     this.globalBucket = new TokenBucket(store.settings.globalRateBps);
+  }
+
+  private get ytdlp(): YtDlp {
+    return new YtDlp(this.store.settings.ytdlpPath, this.store.settings.ffmpegPath);
+  }
+
+  /** List what is downloadable at a page URL. */
+  async extract(url: string): Promise<Extraction> {
+    return this.ytdlp.extract(url);
+  }
+
+  async ytdlpStatus(): Promise<{ ok: boolean; version?: string; error?: string }> {
+    return this.ytdlp.available();
   }
 
   get records(): DownloadRecord[] {
@@ -128,6 +144,10 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       createdAt: new Date().toISOString(),
       ...(req.sourcePage ? { sourcePage: req.sourcePage } : {}),
       ...(req.checksum ? { checksum: req.checksum } : {}),
+      ...(req.formatId ? { formatId: req.formatId } : {}),
+      // An explicit flag wins; otherwise guess from the URL now and correct it
+      // from the probe's content type once the download actually starts.
+      useYtdlp: req.useYtdlp ?? looksLikePage(req.url),
     };
 
     this.store.update((s) => {
@@ -154,6 +174,13 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       return;
     }
 
+    // A page (or an adaptive stream) has to go through yt-dlp; only a direct
+    // file can use our segmented engine.
+    if (record.useYtdlp) {
+      void this.runExternal(record, headers);
+      return;
+    }
+
     const dl = new Download(
       {
         url: record.url,
@@ -177,7 +204,94 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
     void dl.start();
   }
 
+  /**
+   * Download via yt-dlp. Used for pages and adaptive streams, where there is no
+   * single ranged URL for our engine to work with.
+   */
+  private async runExternal(record: DownloadRecord, headers?: Record<string, string>): Promise<void> {
+    const controller = new AbortController();
+    this.external.set(record.id, controller);
+    this.setStatus(record.id, 'downloading');
+
+    try {
+      const { filePath } = await this.ytdlp.download({
+        url: record.url,
+        destDir: record.destDir,
+        ...(record.formatId ? { formatId: record.formatId } : {}),
+        signal: controller.signal,
+        onProgress: (p) => {
+          this.store.update((s) => {
+            const d = s.downloads.find((x) => x.id === record.id);
+            if (!d) return;
+            d.downloaded = p.downloaded;
+            d.totalSize = p.total;
+            d.rateBps = p.speed ?? 0;
+            d.etaSeconds = p.eta;
+            d.status = 'downloading';
+          });
+          this.dirtyProgress.add(record.id);
+        },
+      });
+
+      this.external.delete(record.id);
+
+      if (filePath) {
+        await remuxIfMislabelled(
+          filePath,
+          this.store.settings.ffmpegPath,
+          this.store.settings.ffmpegPath.replace(/ffmpeg$/, 'ffprobe'),
+        ).catch(() => undefined);
+      }
+
+      // A short download can finish before yt-dlp emits a single progress tick,
+      // which would leave the record claiming 0 bytes. Take the truth from the
+      // file that actually landed.
+      let finalSize: number | null = null;
+      if (filePath) finalSize = await fileSize(filePath).catch(() => null);
+
+      this.store.update((s) => {
+        const d = s.downloads.find((x) => x.id === record.id);
+        if (!d) return;
+        d.status = 'completed';
+        if (filePath) {
+          d.filePath = filePath;
+          d.filename = filePath.split('/').pop() ?? d.filename;
+        }
+        if (finalSize !== null) {
+          d.downloaded = finalSize;
+          d.totalSize = finalSize;
+        }
+        d.rateBps = 0;
+        d.etaSeconds = null;
+        d.completedAt = new Date().toISOString();
+      });
+      await this.store.flush();
+
+      const done = this.records.find((d) => d.id === record.id);
+      if (done) {
+        this.emit('done', done);
+        this.runPostDownloadHook(done);
+      }
+      this.pumpQueue();
+    } catch (err) {
+      this.external.delete(record.id);
+      if (controller.signal.aborted) {
+        this.setStatus(record.id, 'paused');
+        return;
+      }
+      this.onError(record.id, err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
   async pause(id: string): Promise<void> {
+    const ext = this.external.get(id);
+    if (ext) {
+      ext.abort();
+      this.external.delete(id);
+      this.setStatus(id, 'paused');
+      this.pumpQueue();
+      return;
+    }
     const dl = this.live.get(id);
     if (!dl) return;
     await dl.pause();
@@ -187,6 +301,8 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
   }
 
   async cancel(id: string): Promise<void> {
+    this.external.get(id)?.abort();
+    this.external.delete(id);
     const dl = this.live.get(id);
     if (dl) {
       await dl.cancel();
@@ -221,7 +337,7 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
   }
 
   private get activeCount(): number {
-    return this.live.size;
+    return this.live.size + this.external.size;
   }
 
   private setStatus(id: string, status: DownloadRecord['status']): void {
@@ -350,6 +466,28 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
     this.progressTimer = null;
     await this.pauseAll();
     await this.store.flush();
+  }
+}
+
+/**
+ * Does this URL look like a page rather than a file?
+ *
+ * Only a first guess — resume() re-checks against the probe's content type, so
+ * a URL with no extension that turns out to serve a real file still takes the
+ * fast path.
+ */
+export function looksLikePage(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const last = u.pathname.split('/').pop() ?? '';
+    const ext = last.includes('.') ? last.split('.').pop()!.toLowerCase() : '';
+
+    if (ext === 'm3u8' || ext === 'mpd') return true;        // adaptive stream
+    if (ext === '' ) return true;                             // /watch, /video/123
+    if (['html', 'htm', 'php', 'aspx', 'jsp'].includes(ext)) return true;
+    return false;
+  } catch {
+    return false;
   }
 }
 

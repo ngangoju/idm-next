@@ -37,6 +37,13 @@ export interface DownloadRecord {
   queueId: string | null;
   /** Page the download was started from, for the UI and for referer. */
   sourcePage?: string;
+  /**
+   * Route through yt-dlp instead of the segmented engine. Set for pages and
+   * adaptive streams, which have no single ranged URL to split.
+   */
+  useYtdlp?: boolean;
+  /** yt-dlp format id, when the user picked one. */
+  formatId?: string;
   error?: string;
   createdAt: string;
   completedAt?: string;
@@ -103,6 +110,9 @@ export interface AddDownloadRequest {
   checksum?: { algorithm: 'md5' | 'sha1' | 'sha256'; value: string };
   /** Start paused, so the user can adjust options first. */
   startPaused?: boolean;
+  /** Force the yt-dlp path; omitted means decide automatically. */
+  useYtdlp?: boolean;
+  formatId?: string;
 }
 
 /**

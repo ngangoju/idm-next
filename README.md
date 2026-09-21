@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 104 tests across core, app and extension
+npm test           # 124 tests across core, app and extension
 npm start          # build and launch the desktop app
 ```
 
