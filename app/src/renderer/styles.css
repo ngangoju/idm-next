@@ -151,3 +151,38 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; padding
 details[open] { display: flex; flex-direction: column; gap: 11px; }
 
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+/* --------------------- format picker & settings --------------------- */
+
+.dialog.wide { width: min(640px, 100%); }
+.sub-line {
+  margin: 0; font-size: 11.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.muted { color: var(--muted); font-size: 12px; margin: 0; }
+.warn-line { color: var(--warn); font-size: 12px; margin: 0; }
+
+.error-box {
+  background: #2a1f1e; border: 1px solid #4a2c2a; border-radius: 7px;
+  padding: 10px 12px; font-size: 12px;
+}
+.error-box p { margin: 5px 0 0; color: var(--muted); }
+
+.formats { display: flex; flex-direction: column; gap: 4px; max-height: 340px; overflow-y: auto; }
+.format {
+  display: grid; grid-template-columns: 96px 1fr 84px 62px;
+  align-items: center; gap: 10px; text-align: left;
+  background: var(--panel-2); border: 1px solid var(--line); padding: 8px 11px;
+}
+.format:hover { border-color: var(--accent); }
+.format .res { font-weight: 550; font-variant-numeric: tabular-nums; }
+.format .codec { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.format .size { color: var(--muted); font-size: 11.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.format .proto {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--warn); text-align: right;
+}
+.format .proto.direct { color: var(--ok); }
+
+button:disabled { opacity: .45; cursor: default; }
+button.nav:disabled:hover { background: transparent; }

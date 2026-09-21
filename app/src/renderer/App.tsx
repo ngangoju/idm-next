@@ -8,6 +8,8 @@ import type {
 import { CATEGORIES, DEFAULT_PORT } from '../shared/protocol.ts';
 import { SegmentStrip } from './SegmentStrip.tsx';
 import { AddDialog } from './AddDialog.tsx';
+import { FormatDialog } from './FormatDialog.tsx';
+import { SettingsDialog } from './SettingsDialog.tsx';
 import { bytes, eta, rate } from './format.ts';
 
 const API = `http://127.0.0.1:${DEFAULT_PORT}`;
@@ -53,6 +55,10 @@ export function App(): React.ReactElement {
   const [filter, setFilter] = useState<Filter>('all');
   const [connected, setConnected] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [ytdlp, setYtdlp] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
+  /** Set when the user adds a page URL and we need a quality first. */
+  const [picking, setPicking] = useState<string | null>(null);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -116,6 +122,7 @@ export function App(): React.ReactElement {
       connect();
       try {
         setSettings((await get<{ settings: Settings }>('/settings')).settings);
+        setYtdlp(await get<{ ok: boolean; version?: string; error?: string }>('/ytdlp'));
       } catch {
         /* the list arrives over the socket regardless */
       }
@@ -181,6 +188,15 @@ export function App(): React.ReactElement {
           ))}
         </nav>
 
+        <button
+          className="nav"
+          onClick={() => setShowSettings(true)}
+          disabled={settings === null}
+          title={settings === null ? 'Waiting for the app to respond…' : undefined}
+        >
+          Settings
+        </button>
+
         <div className="status">
           <span className={connected ? 'dot ok' : 'dot bad'} />
           {connected ? 'Connected' : 'Reconnecting…'}
@@ -204,18 +220,79 @@ export function App(): React.ReactElement {
         ))}
       </main>
 
-      {adding && settings && (
+      {adding && (
         <AddDialog
-          settings={settings}
+          defaultConnections={settings?.defaultConnections ?? 8}
           onClose={() => setAdding(false)}
           onSubmit={async (req) => {
-            await post('/downloads', req);
             setAdding(false);
+            // A page URL has no single file to fetch, so ask which rendition
+            // the user wants before queuing anything.
+            if (looksLikePage(req.url)) {
+              setPicking(req.url);
+              return;
+            }
+            await post('/downloads', req);
+          }}
+        />
+      )}
+
+      {picking && (
+        <FormatDialog
+          url={picking}
+          onClose={() => setPicking(null)}
+          fetchExtraction={async (url) => {
+            const res = await fetch(`${API}/extract`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'x-idm-token': authToken },
+              body: JSON.stringify({ url }),
+            });
+            const body = (await res.json()) as { error?: string };
+            if (!res.ok) throw new Error(body.error ?? `extraction failed (${res.status})`);
+            return body as never;
+          }}
+          onPick={async (formatId, title) => {
+            await post('/downloads', {
+              url: picking,
+              useYtdlp: true,
+              ...(formatId ? { formatId } : {}),
+              ...(title ? { filename: undefined } : {}),
+            });
+            setPicking(null);
+          }}
+        />
+      )}
+
+      {showSettings && settings !== null && (
+        <SettingsDialog
+          settings={settings}
+          ytdlp={ytdlp}
+          onClose={() => setShowSettings(false)}
+          onSave={async (patch) => {
+            const res = (await post('/settings', patch)) as { settings: Settings };
+            setSettings(res.settings);
+            setShowSettings(false);
           }}
         />
       )}
     </div>
   );
+}
+
+/**
+ * Mirrors the main process's routing heuristic so the UI can ask for a quality
+ * before sending a page URL. The server decides authoritatively; this only
+ * decides whether to show the picker.
+ */
+function looksLikePage(url: string): boolean {
+  try {
+    const last = new URL(url).pathname.split('/').pop() ?? '';
+    const ext = last.includes('.') ? last.split('.').pop()!.toLowerCase() : '';
+    if (ext === 'm3u8' || ext === 'mpd' || ext === '') return true;
+    return ['html', 'htm', 'php', 'aspx', 'jsp'].includes(ext);
+  } catch {
+    return false;
+  }
 }
 
 function Row({

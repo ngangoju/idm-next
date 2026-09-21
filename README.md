@@ -21,7 +21,12 @@ idm-next/
 npm install
 npm test           # 124 tests across core, app and extension
 npm start          # build and launch the desktop app
+npm run dist       # package a .dmg / .nsis / .AppImage
 ```
+
+`yt-dlp` and `ffmpeg` are optional — without them direct file downloads work
+fine, and only page/stream downloads are unavailable. Settings tells you which
+it found.
 
 ### Loading the extension
 

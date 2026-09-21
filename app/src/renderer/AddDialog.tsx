@@ -1,20 +1,22 @@
 import { useState } from 'react';
-import type { AddDownloadRequest, Settings } from '../shared/protocol.ts';
+import type { AddDownloadRequest } from '../shared/protocol.ts';
 
 /** IDM's advanced add dialog: the options power users actually reach for. */
 export function AddDialog({
-  settings,
+  defaultConnections,
   onClose,
   onSubmit,
 }: {
-  settings: Settings;
+  /** Taken from settings when they are loaded, else a sane default — this
+      dialog must not be blocked on a settings fetch. */
+  defaultConnections: number;
   onClose: () => void;
   onSubmit: (req: AddDownloadRequest) => void | Promise<void>;
 }): React.ReactElement {
   const [url, setUrl] = useState('');
   const [filename, setFilename] = useState('');
   const [destDir, setDestDir] = useState('');
-  const [connections, setConnections] = useState(settings.defaultConnections);
+  const [connections, setConnections] = useState(defaultConnections);
   const [referer, setReferer] = useState('');
   const [cookie, setCookie] = useState('');
   const [checksum, setChecksum] = useState('');

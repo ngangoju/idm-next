@@ -11,7 +11,8 @@
     "build": "npm run build:main && npm run build:renderer",
     "dev": "node scripts/dev.mjs",
     "start": "npm run build && electron .",
-    "dev:renderer": "vite"
+    "dev:renderer": "vite",
+    "dist": "npm run build && electron-builder"
   },
   "dependencies": {
     "@idm-next/core": "*",
@@ -28,6 +29,40 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "description": "A modern download manager with Chrome/Brave integration.",
+  "author": "IDM-Next",
+  "license": "MIT",
+  "build": {
+    "appId": "com.idmnext.app",
+    "productName": "IDM-Next",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network"
+    }
   }
 }
