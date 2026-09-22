@@ -142,6 +142,46 @@
   }
 
   /**
+   * Does this row tell the user anything that distinguishes it?
+   *
+   * A sniffed entry is worth listing when it has a real name, a size, or a
+   * quality. On a CDN-backed site it often has none of the three: the name is
+   * a signed token, the size is unknowable because the player requests byte
+   * ranges as query parameters (so no Content-Range ever arrives), and there
+   * is no resolution anywhere in the URL. Eight rows reading "Instagram, MP4
+   * file" are not a choice, and presenting them as one is worse than saying
+   * plainly that the page has to be analysed.
+   */
+  function isInformative(item) {
+    if (item.size) return true;
+    if (qualityOf(item)) return true;
+    const name = (item.title ?? '').trim();
+    if (!name) return false;
+    // "Instagram" names the site, not the clip. The worker avoids using it,
+    // but the DOM scan reports document.title directly, so check here too.
+    if (SITE_NAMES.has(name.toLowerCase())) return false;
+    return !looksOpaque(name);
+  }
+
+  /** Titles that identify a site rather than anything on it. */
+  const SITE_NAMES = new Set([
+    'instagram', 'youtube', 'facebook', 'vimeo', 'tiktok', 'twitter', 'x',
+    'reddit', 'twitch', 'dailymotion', 'video', 'watch', 'home', 'feed',
+  ]);
+
+  /** Mirrors the worker's rule; the panel gets titles already resolved. */
+  function looksOpaque(name) {
+    const stem = name.includes('.') ? name.slice(0, name.lastIndexOf('.')) : name;
+    if (stem.length < 16) return false;
+    const longest = stem.split(/[\s._-]+/).reduce((a, b) => (b.length > a.length ? b : a), '');
+    if (longest.length < 16) return false;
+    const upper = /[A-Z]/.test(longest);
+    const lower = /[a-z]/.test(longest);
+    const digit = /\d/.test(longest);
+    return (upper && lower && digit) || /^[0-9a-f]{20,}$/i.test(longest);
+  }
+
+  /**
    * "Streets of Rage 2 Stage 1, MP4 file, quality 720p HD" — the same shape
    * IDM uses: what it is, then what kind, then how good.
    */
@@ -415,6 +455,38 @@
     /** The sniffed list is capped until the user asks for the rest. */
     let expanded = false;
 
+    /**
+     * The raw sniffed files, for the rare case someone wants one. Kept behind
+     * a click because they carry no name, size or quality — listing them as
+     * the choice is what made this panel unusable.
+     */
+    function rawFilesToggle(count) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = `${count} raw file${count === 1 ? '' : 's'} also detected — show`;
+      li.addEventListener('click', (e) => {
+        e.stopPropagation();
+        list.textContent = '';
+        items.forEach((item, i) => {
+          const row = document.createElement('li');
+          const n = document.createElement('span');
+          n.className = 'n';
+          n.textContent = `${i + 1}.`;
+          const d = document.createElement('span');
+          d.className = 'desc';
+          d.textContent = describe(item);
+          d.title = item.url;
+          row.append(n, d);
+          row.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            send(item);
+          });
+          list.appendChild(row);
+        });
+      });
+      return li;
+    }
+
     /** The "just get the video on this page" row, at the top of the list. */
     function analyseOption() {
       const li = document.createElement('li');
@@ -528,27 +600,31 @@
       lastRejects = context.rejects ?? [];
       sabrSeen = Boolean(context.sabr);
       label.textContent = labelFor(items);
-      count.hidden = items.length < 2;
-      count.textContent = String(items.length);
+      const informative = items.filter(isInformative);
+      count.hidden = informative.length < 2;
+      count.textContent = String(informative.length);
       // Over a quality list every row is the same video at a different size,
       // so "download all" would queue eight copies of one thing.
-      head.hidden = items.length === 0;
+      head.hidden = informative.length === 0;
 
       list.textContent = '';
-      if (items.length === 0) {
+
+      // Nothing sniffed, or nothing sniffed that says anything: the page has
+      // to be analysed either way, so show the qualities rather than a wall of
+      // indistinguishable rows.
+      const useful = items.filter(isInformative);
+      if (useful.length === 0) {
         renderQualities();
+        if (items.length > 0) list.appendChild(rawFilesToggle(items.length));
         return;
       }
 
-      // Always offer the unambiguous route first. Sniffed CDN files cannot say
-      // which clip on a feed page you are actually watching, and on a site
-      // like Instagram they arrive as signed tokens with no quality at all —
-      // so "the video on this page, at a quality I pick" has to be one click
-      // away even when there are files to list.
+      // Always offer the unambiguous route first. Sniffed files cannot say
+      // which clip on a feed page you are actually watching.
       list.appendChild(analyseOption());
 
       const CAP = 8;
-      const shown = expanded ? items : items.slice(0, CAP);
+      const shown = expanded ? useful : useful.slice(0, CAP);
       shown.forEach((item, i) => {
         const li = document.createElement('li');
         const n = document.createElement('span');
@@ -566,10 +642,10 @@
         list.appendChild(li);
       });
 
-      if (!expanded && items.length > CAP) {
+      if (!expanded && useful.length > CAP) {
         const more = document.createElement('li');
         more.className = 'empty';
-        more.textContent = `Show all ${items.length} files…`;
+        more.textContent = `Show all ${useful.length} files…`;
         more.addEventListener('click', (e) => {
           e.stopPropagation();
           expanded = true;

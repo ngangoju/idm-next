@@ -44,6 +44,19 @@ export const MIN_MEDIA_BYTES = 200 * 1024;
  */
 const IDENTITY_PARAMS = ['itag', 'quality', 'res', 'resolution', 'format', 'fmt', 'type', 'vq'];
 
+/**
+ * A title that is just the site's name tells the user nothing about which
+ * file a row is. Instagram's reel pages often report exactly this.
+ */
+const SITE_NAMES = new Set([
+  'instagram', 'youtube', 'facebook', 'vimeo', 'tiktok', 'twitter', 'x',
+  'reddit', 'twitch', 'dailymotion', 'video', 'watch', 'home', 'feed',
+]);
+
+export function isSiteName(title) {
+  return SITE_NAMES.has((title ?? '').trim().toLowerCase());
+}
+
 /** Endpoint names shared by every file on a site, so they identify nothing. */
 const GENERIC_NAMES = new Set([
   'videoplayback', 'watch', 'download', 'index', 'master', 'playlist',

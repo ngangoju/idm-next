@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 178 tests across core, app and extension
+npm test           # 179 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 npm run bench -w core   # measure download throughput
@@ -74,6 +74,14 @@ it rejects every real video for being too small. And an attachment only counts
 as a download if it actually names a file: subtitle and telemetry endpoints are
 served with `Content-Disposition: attachment` and would otherwise fill the panel
 with 1 KB JSON while the video went missing.
+
+**Knowing when sniffing has nothing to offer.** A sniffed entry is worth
+listing only if it has a name, a size or a quality. On a CDN-backed site it
+often has none of the three: the name is a signed token, the page title is just
+"Instagram", and the size is unknowable because the player requests byte ranges
+as query parameters, so no `Content-Range` ever arrives. Rather than present
+ten identical rows as a choice, the panel shows the quality list from page
+extraction — which has all three — and keeps the raw files behind one line.
 
 **Naming what it found.** CDNs name media with signed opaque tokens —
 Instagram's look like `AQMOZ1cfHZuJEuODZ770FSIURCg9L7NMAYjQnJSRDfdCrj4lFYNqzU`

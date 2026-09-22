@@ -87,9 +87,14 @@ describe('panel behaviour that a merge has dropped before', () => {
     assert.match(handler, /renderQualities\(\)/);
   });
 
-  test('"Download all" is hidden when the list is qualities, not files', () => {
-    // Every row would be the same video at a different size.
-    assert.match(SRC, /head\.hidden\s*=\s*items\.length === 0/);
+  test('"Download all" is hidden when there is nothing listable to take', () => {
+    // Over a quality list every row is the same video at a different size, and
+    // rows that carry no name, size or quality are not a choice either.
+    assert.match(SRC, /head\.hidden\s*=\s*informative\.length === 0/);
+  });
+
+  test('rows are filtered by whether they say anything', () => {
+    assert.match(SRC, /items\.filter\(isInformative\)/);
   });
 });
 

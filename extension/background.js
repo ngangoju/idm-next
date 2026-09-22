@@ -14,6 +14,7 @@ import {
   ARCHIVE_EXTENSIONS,
   classify,
   looksOpaqueName,
+  isSiteName,
   looksMediaAdjacent,
   isUnfetchableStream,
   recordReject,
@@ -102,8 +103,12 @@ async function recordIfMedia(details) {
   // A CDN blob name is not a label a person can choose between, so fall back
   // to the page's own title. Instagram serves every clip as a signed opaque
   // token; thirty rows of those tell the user nothing.
+  // A CDN blob name is not a label a person can choose between, so fall back
+  // to the page's own title — unless that is just the site's name, which
+  // distinguishes nothing either.
   const rawFilename = filenameOf(details.url);
-  const title = looksOpaqueName(rawFilename) && pageTitle ? pageTitle : rawFilename;
+  const usableTitle = pageTitle && !isSiteName(pageTitle) ? pageTitle : '';
+  const title = looksOpaqueName(rawFilename) ? usableTitle || rawFilename : rawFilename;
 
   await addDetection(details.tabId, {
     url: details.url,
