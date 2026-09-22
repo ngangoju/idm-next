@@ -102,6 +102,15 @@ export function SettingsDialog({
         <label className="check">
           <input
             type="checkbox"
+            checked={draft.autoOpenDetails}
+            onChange={(e) => set('autoOpenDetails', e.target.checked)}
+          />
+          Show the detail window when a download starts
+        </label>
+
+        <label className="check">
+          <input
+            type="checkbox"
             checked={draft.shutdownWhenQueueDone}
             onChange={(e) => set('shutdownWhenQueueDone', e.target.checked)}
           />

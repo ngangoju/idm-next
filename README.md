@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 166 tests across core, app and extension
+npm test           # 167 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 npm run bench -w core   # measure download throughput
@@ -101,6 +101,13 @@ outcome, not a failure.
 auto-sorting, global and per-download speed caps, proxy support, cookie/referer
 passthrough, clipboard monitoring, checksum verification, a post-download
 command hook, and shutdown-when-the-queue-finishes.
+
+**The detail window.** Click any download — or let it open itself as a
+transfer starts, the way IDM does — for size, rate, time left, resume
+capability, and a table of every connection with its own progress. That last
+part is the thing a single progress bar cannot express: each row is one HTTP
+connection working its own byte range, and because segments are split by work
+stealing the list grows and the shares move while you watch.
 
 ## Speed
 

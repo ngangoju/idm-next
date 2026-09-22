@@ -674,3 +674,100 @@ details[open] { display: flex; flex-direction: column; gap: 12px; }
 .format .proto.direct { color: var(--ok); }
 
 button:disabled { opacity: 0.45; cursor: default; }
+
+/* ======================= download detail window ======================= */
+
+.dialog.detail { width: min(680px, 100%); gap: 15px; }
+
+.detail-head { display: flex; align-items: center; gap: 11px; }
+.detail-head h2 {
+  flex: 1; min-width: 0;
+  font-size: 14.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.detail-pct {
+  flex: none;
+  font-size: 12px; font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-hi);
+  background: var(--accent-dim);
+  padding: 3px 8px; border-radius: 99px;
+  min-width: 52px; text-align: center;
+}
+
+.detail-url {
+  display: block;
+  font-size: 11.5px; color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin: -6px 0 0;
+}
+
+/* Two columns of label/value, so the figures line up down the window. */
+.stats {
+  margin: 0;
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 9px 22px;
+}
+.stats > div { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
+.stats dt { color: var(--text-faint); font-size: 12px; flex: none; }
+.stats dd {
+  margin: 0; font-size: 12px; font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stats dd.path { font-weight: 400; color: var(--text-dim); direction: rtl; text-align: left; }
+.stats dd.yes { color: var(--ok); }
+.stats dd.no { color: var(--warn); }
+.stats .st-downloading { color: var(--accent-hi); }
+.stats .st-completed { color: var(--ok); }
+.stats .st-failed { color: var(--bad); }
+.stats .st-paused { color: var(--warn); }
+.muted-inline { color: var(--text-faint); font-weight: 400; }
+
+.bar.big { height: 8px; margin-top: 0; }
+
+.detail-caption {
+  margin: 0; font-size: 11px; color: var(--text-faint);
+  text-align: center; letter-spacing: 0.01em;
+}
+
+/* One block per connection, positioned at its true offset in the file. */
+.conn-strip { position: relative; height: 14px; margin-top: -6px; }
+.conn-seg {
+  position: absolute; top: 0; height: 100%;
+  background: #0d1015; border-radius: 2px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+.conn-seg-fill { height: 100%; background: linear-gradient(180deg, var(--accent-hi), var(--accent)); }
+
+.conn-table {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden auto;
+  max-height: 190px;
+}
+.conn-row {
+  display: grid; grid-template-columns: 44px 108px 1fr;
+  gap: 10px; align-items: center;
+  padding: 6px 11px;
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.conn-row:last-child { border-bottom: none; }
+.conn-head {
+  position: sticky; top: 0;
+  background: var(--raised-hi);
+  color: var(--text-faint);
+  font-weight: 600; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.conn-n { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.conn-bytes { font-variant-numeric: tabular-nums; font-weight: 550; }
+.conn-info { color: var(--text-dim); }
+.conn-info.done { color: var(--ok); }
+
+.dialog-actions button { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Rows are clickable now, so say so. */
+.row { cursor: pointer; }
+.row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

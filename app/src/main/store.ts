@@ -34,6 +34,7 @@ export function defaultSettings(): Settings {
     browserTakeover: true,
     postDownloadCommand: null,
     shutdownWhenQueueDone: false,
+    autoOpenDetails: true,
     ytdlpPath: 'yt-dlp',
     ffmpegPath: 'ffmpeg',
     proxy: null,

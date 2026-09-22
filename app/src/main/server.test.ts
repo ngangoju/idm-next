@@ -231,6 +231,55 @@ describe('removal is broadcast', () => {
   });
 });
 
+describe('progress carries the name', () => {
+  test('so a title resolved mid-download reaches the screen', async () => {
+    // A page download is named for its host until yt-dlp reports the real
+    // title. The store was updated but the progress event did not carry
+    // `filename`, so the UI showed "Video from youtube.com" for the whole
+    // download and only corrected itself on a reload.
+    const { WebSocket } = await import('ws');
+    const { startFixture, makeBody } = await import('../../../core/test/fixture-server.ts');
+    const fx = await startFixture({
+      body: makeBody(3 * 1024 * 1024),
+      etag: '"v1"',
+      slowRange: { from: 0, to: 3 * 1024 * 1024, bps: 1024 * 1024 },
+    });
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/?token=${TOKEN}`);
+    await new Promise((r) => ws.on('open', r));
+
+    const progress: Record<string, unknown>[] = [];
+    ws.on('message', (raw: Buffer) => {
+      const event = JSON.parse(raw.toString()) as { type: string; downloads?: unknown[] };
+      if (event.type === 'progress') {
+        progress.push(...((event.downloads ?? []) as Record<string, unknown>[]));
+      }
+    });
+
+    try {
+      await fetch(`${base}/downloads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: fx.url, connections: 2 }),
+      });
+
+      for (let i = 0; i < 60 && progress.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      assert.ok(progress.length > 0, 'no progress events arrived');
+
+      const tick = progress[0]!;
+      assert.ok('filename' in tick, 'progress must carry filename');
+      assert.ok('category' in tick, 'progress must carry category');
+      assert.equal(typeof tick['filename'], 'string');
+    } finally {
+      ws.close();
+      await fx.close();
+      await manager.pauseAll();
+    }
+  });
+});
+
 describe('method discipline', () => {
   test('mutations are not reachable by GET', async () => {
     // Stops <img src> and top-level navigation from triggering a mutation.

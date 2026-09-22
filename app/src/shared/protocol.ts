@@ -78,6 +78,8 @@ export interface Settings {
   /** Shell command run after a download completes; {file} is substituted. */
   postDownloadCommand: string | null;
   shutdownWhenQueueDone: boolean;
+  /** Open the detail window when a download starts, the way IDM does. */
+  autoOpenDetails: boolean;
   ytdlpPath: string;
   ffmpegPath: string;
   proxy: string | null;
@@ -139,8 +141,14 @@ export interface ProbeResponse {
 export type ServerEvent =
   | { type: 'hello'; version: string }
   | { type: 'downloads'; downloads: DownloadRecord[] }
+  /**
+   * `filename` and `category` belong here, not just in the initial list: a
+   * page download is named for its host until yt-dlp reports the real title,
+   * and without them that title reached the store but never the screen.
+   */
   | { type: 'progress'; downloads: Pick<DownloadRecord,
-      'id' | 'status' | 'downloaded' | 'totalSize' | 'rateBps' | 'etaSeconds' | 'segments'>[] }
+      'id' | 'status' | 'downloaded' | 'totalSize' | 'rateBps' | 'etaSeconds' | 'segments'
+      | 'filename' | 'category' | 'filePath' | 'error'>[] }
   | { type: 'download-added'; download: DownloadRecord }
   | { type: 'download-done'; download: DownloadRecord }
   | { type: 'download-error'; id: string; error: string }

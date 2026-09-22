@@ -301,6 +301,10 @@ export class ControlServer {
           rateBps: d.rateBps,
           etaSeconds: d.etaSeconds,
           segments: d.segments,
+          filename: d.filename,
+          category: d.category,
+          filePath: d.filePath,
+          error: d.error,
         })),
       }),
     );

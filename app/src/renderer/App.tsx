@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Category, DownloadRecord, ServerEvent, Settings } from '../shared/protocol.ts';
 import { CATEGORIES, DEFAULT_PORT, humanizeError } from '../shared/protocol.ts';
 import { SegmentStrip } from './SegmentStrip.tsx';
 import { AddDialog } from './AddDialog.tsx';
 import { FormatDialog } from './FormatDialog.tsx';
 import { SettingsDialog } from './SettingsDialog.tsx';
+import { DetailDialog } from './DetailDialog.tsx';
 import { bytes, eta, rate, relativeTime, hostOf } from './format.ts';
 import * as Icon from './icons.tsx';
 
@@ -85,6 +86,13 @@ export function App(): React.ReactElement {
   const [showSettings, setShowSettings] = useState(false);
   const [ytdlp, setYtdlp] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
+  // Read inside the socket handler without re-subscribing on every change.
+  const autoOpenRef = useRef(true);
+  useEffect(() => {
+    autoOpenRef.current = settings?.autoOpenDetails ?? true;
+  }, [settings]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -109,6 +117,12 @@ export function App(): React.ReactElement {
             break;
           case 'download-added':
             setDownloads((prev) => [event.download, ...prev]);
+            // The same thing IDM does: show the transfer as it begins. Only
+            // for a download that actually starts, so adding a batch paused
+            // does not throw a window on screen for each one.
+            if (autoOpenRef.current && event.download.status !== 'paused') {
+              setDetailId(event.download.id);
+            }
             break;
           case 'download-done':
             setDownloads((prev) =>
@@ -342,7 +356,9 @@ export function App(): React.ReactElement {
           {visible.length === 0 ? (
             <EmptyState filter={filter} onAdd={() => setAdding(true)} />
           ) : (
-            visible.map((d) => <Row key={d.id} d={d} onAct={act} />)
+            visible.map((d) => (
+              <Row key={d.id} d={d} onAct={act} onOpen={() => setDetailId(d.id)} />
+            ))
           )}
         </div>
       </main>
@@ -389,6 +405,15 @@ export function App(): React.ReactElement {
         />
       )}
 
+      {detailId !== null && (() => {
+        const record = downloads.find((x) => x.id === detailId);
+        // The row can disappear underneath the window — cleared, or cancelled
+        // from another client.
+        return record ? (
+          <DetailDialog record={record} onClose={() => setDetailId(null)} onAct={act} />
+        ) : null;
+      })()}
+
       {showSettings && settings !== null && (
         <SettingsDialog
           settings={settings}
@@ -430,9 +455,11 @@ function NavItem({
 function Row({
   d,
   onAct,
+  onOpen,
 }: {
   d: DownloadRecord;
   onAct: (path: string, id: string) => void;
+  onOpen: () => void;
 }): React.ReactElement {
   const CatIcon = CATEGORY_ICON[d.category];
 
@@ -451,7 +478,18 @@ function Row({
   const indeterminate = !done && d.status === 'downloading' && !d.totalSize;
 
   return (
-    <article className={`row ${d.status}`}>
+    <article
+      className={`row ${d.status}`}
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
       <div className={`row-icon ${d.category}`}>
         <CatIcon size={17} />
       </div>
@@ -623,7 +661,10 @@ function IconButton({
   return (
     <button
       className={danger ? 'icon-btn danger' : 'icon-btn'}
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       title={label}
       aria-label={label}
     >
