@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test detection.test.js"
+    "test": "node --test detection.test.js content.test.js"
   }
 }

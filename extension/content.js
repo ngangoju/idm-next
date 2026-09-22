@@ -301,15 +301,6 @@
       }, 2200);
     };
 
-    /** Hand the page itself to the app, which resolves it with yt-dlp. */
-    const sendPage = () => {
-      chrome.runtime
-        .sendMessage({ type: 'download', url: location.href, pageUrl: location.href, filename: '' })
-        .then((res) => flash(res?.ok ? '\u2713 Analysing page…' : '\u2717 IDM-Next not running'))
-        .catch(() => flash('\u2717 Failed'));
-      menu.classList.remove('open');
-    };
-
     const send = (item) => {
       chrome.runtime
         .sendMessage({
@@ -392,7 +383,10 @@
       }
       e.preventDefault();
       e.stopPropagation();
-      if (items.length > 0) send(items[0]);
+      if (items.length > 0) return send(items[0]);
+      // Nothing sniffable: show the real choices rather than silently picking.
+      menu.classList.add('open');
+      renderQualities();
     });
 
     root.querySelector('.caret').addEventListener('click', (e) => {
@@ -453,7 +447,17 @@
 
       if (qualityState.kind === 'error') {
         list.appendChild(note(qualityState.message, 'err'));
-        list.appendChild(note('Make sure the IDM-Next app is running.', 'hint'));
+        const retry = document.createElement('li');
+        retry.className = 'fallback';
+        retry.innerHTML =
+          '<span class="n">&#8635;</span><span class="desc"><strong>Try again</strong><br>' +
+          '<span class="hint">Make sure the IDM-Next app is running.</span></span>';
+        retry.addEventListener('click', (e) => {
+          e.stopPropagation();
+          qualityState = { kind: 'idle' };
+          renderQualities();
+        });
+        list.appendChild(retry);
         return;
       }
 
@@ -510,6 +514,9 @@
       label.textContent = labelFor(items);
       count.hidden = items.length < 2;
       count.textContent = String(items.length);
+      // Over a quality list every row is the same video at a different size,
+      // so "download all" would queue eight copies of one thing.
+      head.hidden = items.length === 0;
 
       list.textContent = '';
       if (items.length === 0) {
@@ -572,6 +579,11 @@
       setOffset: (x, y) => {
         userOffsetX = x;
         userOffsetY = y;
+      },
+      /** Forget the previous page's choices after an in-page navigation. */
+      resetQualities: () => {
+        qualityState = { kind: 'idle' };
+        menu.classList.remove('open');
       },
     };
     document.body.appendChild(host);
