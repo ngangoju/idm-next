@@ -85,6 +85,7 @@ describe('parseExtraction', () => {
       { format_id: '18', ext: 'mp4', width: 640, height: 360, protocol: 'https', url: 'https://x.test/360.mp4', vcodec: 'avc1', acodec: 'mp4a', filesize: 1000 },
       { format_id: '137', ext: 'mp4', width: 1920, height: 1080, protocol: 'https', url: 'https://x.test/1080.mp4', vcodec: 'avc1', acodec: 'none', filesize_approx: 5000, fps: 30 },
       { format_id: 'hls-720', ext: 'mp4', height: 720, protocol: 'm3u8_native', url: 'https://x.test/m.m3u8', vcodec: 'avc1', acodec: 'mp4a' },
+      { format_id: '251', ext: 'webm', protocol: 'https', url: 'https://x.test/audio.webm', vcodec: 'none', acodec: 'opus', tbr: 128, filesize: 800 },
     ],
   });
 
@@ -92,9 +93,11 @@ describe('parseExtraction', () => {
     const e = parseExtraction(sample);
     assert.equal(e.title, 'Some Talk');
     assert.equal(e.duration, 3600);
-    assert.equal(e.formats.length, 3);
-    // yt-dlp lists worst-to-best; we reverse so the UI shows best first.
-    assert.equal(e.formats[0]?.id, 'hls-720');
+    assert.equal(e.formats.length, 4);
+    // yt-dlp lists worst-to-best; we reverse so the UI shows best first. The
+    // audio-only track sits last in the fixture, so it leads after reversing —
+    // raw `formats` is not the user-facing order, `qualities` is.
+    assert.equal(e.formats[0]?.id, '251');
     assert.equal(e.formats.at(-1)?.id, '18');
   });
 
@@ -113,6 +116,21 @@ describe('parseExtraction', () => {
     assert.equal(f1080?.resolution, '1920x1080');
     assert.equal(f1080?.acodec, null, 'video-only format should report no audio codec');
     assert.equal(f1080?.filesize, 5000, 'filesize_approx should be used when filesize is absent');
+  });
+
+  test('groups adaptive video and audio into one choice per resolution', () => {
+    const e = parseExtraction(sample);
+    const hd = e.qualities.find((q) => q.height === 1080);
+    const hls = e.qualities.find((q) => q.height === 720);
+
+    assert.equal(hd?.formatId, '137+251');
+    assert.equal(hd?.label, '1080p HD');
+    assert.equal(hd?.filesize, 5800);
+    assert.equal(hls?.formatId, 'hls-720');
+    // 1080 (merged), 720 (HLS, already has audio) and 360 (progressive).
+    assert.equal(e.qualities.filter((q) => q.height !== null).length, 3);
+    // And an audio-only choice alongside them.
+    assert.ok(e.qualities.some((q) => q.height === null && q.label === 'Audio only'));
   });
 
   test('unwraps a playlist to its first entry', () => {

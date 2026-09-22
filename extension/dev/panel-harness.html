@@ -52,6 +52,8 @@
       // Shaped like what the background worker keeps after filtering a real
       // YouTube watch page: one entry per rendition, sizes taken from
       // Content-Range, and none of the timedtext/telemetry noise.
+      // The page the harness pretends to be, used for the real extract call.
+      const HARNESS_PAGE_URL = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
       const GV = 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606';
       const FIXTURE = [
         { url: `${GV}&itag=137&mime=video%2Fmp4`, kind: 'video', size: 189_000_000, title: 'Director Musinga - Live Session', isManifest: false, contentType: 'video/mp4' },
@@ -69,7 +71,23 @@
       window.chrome = {
         runtime: {
           sendMessage(msg) {
-            if (msg.type === 'list') return Promise.resolve({ items: FIXTURE });
+            // Nothing sniffable, so the panel falls through to asking the app
+            // — the path that matters on a real streaming site.
+            if (msg.type === 'list') return Promise.resolve({ items: [], rejects: [], sabr: true });
+            if (msg.type === 'extract') {
+              // A real call to the running app, so the list below is genuine.
+              return fetch('http://127.0.0.1:47591/extract', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ url: HARNESS_PAGE_URL }),
+              })
+                .then((r) => r.json())
+                .then((d) => {
+                  log(`extract -> ${d.qualities?.length ?? 0} qualities`);
+                  return { ok: true, title: d.title, qualities: d.qualities ?? [] };
+                })
+                .catch((e) => ({ ok: false, error: e.message }));
+            }
             if (msg.type === 'download') {
               log(`download -> ${msg.url.slice(0, 96)}…`);
               return Promise.resolve({ ok: true });

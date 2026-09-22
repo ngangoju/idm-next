@@ -25,6 +25,7 @@ import {
   getDetections,
   callApp,
   appIsRunning,
+  extractQualities,
   contextHeadersFor,
   filenameOf,
   isManifest,
@@ -146,9 +147,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  if (msg?.type === 'extract') {
+    void (async () => {
+      if (!(await appIsRunning())) {
+        sendResponse({ ok: false, error: 'IDM-Next is not running' });
+        return;
+      }
+      try {
+        const data = await extractQualities(msg.url);
+        sendResponse({ ok: true, title: data.title, qualities: data.qualities ?? [] });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+    })();
+    return true;
+  }
+
   if (msg?.type === 'download') {
     // Must return true synchronously to keep the channel open.
-    void startDownload(msg.url, msg.pageUrl, msg.filename)
+    void startDownload(msg.url, msg.pageUrl, msg.filename, msg.formatId)
       .then((r) => sendResponse(r))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;

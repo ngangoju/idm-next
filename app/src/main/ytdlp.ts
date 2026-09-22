@@ -23,6 +23,8 @@ export interface YtFormat {
   ext: string;
   /** e.g. "1920x1080" or "720p"; null when the format does not say. */
   resolution: string | null;
+  /** Pixel height, for grouping renditions into one choice per quality. */
+  height: number | null;
   fps: number | null;
   vcodec: string | null;
   acodec: string | null;
@@ -40,8 +42,29 @@ export interface Extraction {
   duration: number | null;
   thumbnail: string | null;
   formats: YtFormat[];
+  /**
+   * One complete, playable choice per resolution — what a person actually
+   * wants to pick from. Raw `formats` lists video and audio separately above
+   * 720p, so choosing from it directly yields a silent file.
+   */
+  qualities: QualityChoice[];
   /** True when this is a playlist rather than a single item. */
   isPlaylist: boolean;
+}
+
+export interface QualityChoice {
+  /** yt-dlp selector: "137+251" for a merge, "22" when it already has audio. */
+  formatId: string;
+  /** "1080p HD", "720p", "Audio only". */
+  label: string;
+  height: number | null;
+  fps: number | null;
+  ext: string;
+  /** Video plus audio when a merge is needed; null when nothing reports a size. */
+  filesize: number | null;
+  /** Needs muxing, so it costs an ffmpeg pass. */
+  merged: boolean;
+  protocol: string;
 }
 
 export interface YtProgress {
@@ -116,6 +139,7 @@ function toFormat(raw: Record<string, unknown>): YtFormat {
     resolution:
       str(raw['resolution']) ??
       (width && height ? `${width}x${height}` : height ? `${height}p` : null),
+    height,
     fps: num(raw['fps']),
     vcodec: str(raw['vcodec']) === 'none' ? null : str(raw['vcodec']),
     acodec: str(raw['acodec']) === 'none' ? null : str(raw['acodec']),
@@ -142,14 +166,83 @@ export function parseExtraction(json: string): Extraction {
     ? (entry['formats'] as Record<string, unknown>[]).map(toFormat)
     : [];
 
+  // Newest/highest first — yt-dlp orders worst-to-best.
+  const ordered = formats.reverse();
+
   return {
     title: typeof entry['title'] === 'string' ? entry['title'] : 'download',
     duration: typeof entry['duration'] === 'number' ? entry['duration'] : null,
     thumbnail: typeof entry['thumbnail'] === 'string' ? entry['thumbnail'] : null,
-    // Newest/highest first — yt-dlp orders worst-to-best.
-    formats: formats.reverse(),
+    formats: ordered,
+    qualities: buildQualities(ordered),
     isPlaylist,
   };
+}
+
+/**
+ * Collapse yt-dlp's format list into one complete choice per resolution.
+ *
+ * Above 720p YouTube (and most adaptive sources) publish video and audio as
+ * separate formats. A list built straight from `formats` therefore offers
+ * "1080p" entries that download silent, which is the single most common way a
+ * quality picker misleads people. Each choice here is guaranteed to carry
+ * sound: a format that already has audio is used as-is, and a video-only one
+ * is paired with the best audio track.
+ */
+export function buildQualities(formats: YtFormat[]): QualityChoice[] {
+  const audioOnly = formats.filter((f) => !f.vcodec && f.acodec);
+  const bestAudio =
+    [...audioOnly].sort((a, b) => (b.tbr ?? 0) - (a.tbr ?? 0))[0] ?? null;
+
+  const score = (f: YtFormat): number => f.filesize ?? f.tbr ?? 0;
+
+  const byHeight = new Map<number, YtFormat>();
+  for (const f of formats) {
+    const h = f.height;
+    if (!f.vcodec || h === null) continue;
+    const current = byHeight.get(h);
+    // Prefer a format that already carries audio: no merge, no ffmpeg pass.
+    if (
+      !current ||
+      (!current.acodec && f.acodec) ||
+      (Boolean(current.acodec) === Boolean(f.acodec) && score(f) > score(current))
+    ) {
+      byHeight.set(h, f);
+    }
+  }
+
+  const choices: QualityChoice[] = [];
+  for (const [height, video] of [...byHeight.entries()].sort((a, b) => b[0] - a[0])) {
+    const needsAudio = !video.acodec && bestAudio !== null;
+    const sizes = [video.filesize, needsAudio ? bestAudio!.filesize : null];
+    const known = sizes.filter((n): n is number => typeof n === 'number');
+
+    choices.push({
+      formatId: needsAudio ? `${video.id}+${bestAudio!.id}` : video.id,
+      label: `${height}p${height >= 720 ? ' HD' : ''}${video.fps && video.fps > 30 ? ` ${video.fps}` : ''}`,
+      height,
+      fps: video.fps,
+      ext: video.ext,
+      filesize: known.length > 0 ? known.reduce((a, b) => a + b, 0) : null,
+      merged: needsAudio,
+      protocol: video.protocol,
+    });
+  }
+
+  if (bestAudio) {
+    choices.push({
+      formatId: bestAudio.id,
+      label: 'Audio only',
+      height: null,
+      fps: null,
+      ext: bestAudio.ext,
+      filesize: bestAudio.filesize,
+      merged: false,
+      protocol: bestAudio.protocol,
+    });
+  }
+
+  return choices;
 }
 
 export class YtDlp {
@@ -198,7 +291,9 @@ export class YtDlp {
     signal?: AbortSignal;
   }): Promise<{ filePath: string }> {
     const args = [
-      '--no-warnings',
+      // Warnings are not suppressed here on purpose: "the formats won't be
+      // merged" arrives as a warning on an otherwise successful run, and
+      // silencing it is how a silent audio-only file passes for a 1080p video.
       '--no-playlist',
       '--newline',
       // Structured progress. Regexing the human-readable bar breaks on every
@@ -207,8 +302,6 @@ export class YtDlp {
       'download:%(progress)j',
       '--progress-delta',
       '0.25',
-      '--ffmpeg-location',
-      this.ffmpeg,
       '-N',
       String(opts.concurrentFragments ?? 8),
       '-o',
@@ -216,7 +309,30 @@ export class YtDlp {
       '--print',
       'after_move:%(filepath)s',
     ];
-    if (opts.formatId) args.push('-f', opts.formatId);
+    // --ffmpeg-location takes a PATH, not a command name. Given a bare
+    // "ffmpeg" it warns that the location does not exist and then continues
+    // *without ffmpeg at all*, which silently disables every merge. Pass it
+    // only when it really is a path; otherwise let yt-dlp find ffmpeg itself.
+    if (this.ffmpeg && this.ffmpeg.includes('/')) {
+      args.push('--ffmpeg-location', this.ffmpeg);
+    }
+
+    if (opts.formatId) {
+      // Above 720p YouTube serves video and audio separately, so asking for a
+      // rendition by id alone yields a silent file. "<id>+bestaudio/<id>" asks
+      // for the merge and falls back to the format on its own when it already
+      // carries audio.
+      const selector = opts.formatId.includes('+')
+        ? opts.formatId
+        : `${opts.formatId}+bestaudio/${opts.formatId}`;
+      args.push('-f', selector);
+
+      // A preference, not a demand. Forcing mp4 makes a VP9/WebM pair
+      // unmergeable: ffmpeg refuses, yt-dlp still exits 0 having printed the
+      // path it intended, and all that is left on disk are the two
+      // intermediates — so the "1080p" download completes as a bare .m4a.
+      args.push('--merge-output-format', 'mp4/mkv/webm');
+    }
     args.push(opts.url);
 
     return new Promise((resolve, reject) => {
@@ -261,8 +377,22 @@ export class YtDlp {
 
       child.on('close', (code) => {
         opts.signal?.removeEventListener('abort', onAbort);
-        if (code === 0) return resolve({ filePath: finalPath });
-        reject(new Error(stderr.trim().split('\n').pop() ?? `yt-dlp exited ${code}`));
+        if (code !== 0) {
+          reject(new Error(stderr.trim().split('\n').pop() ?? `yt-dlp exited ${code}`));
+          return;
+        }
+        // A failed merge is only a warning, so exit code 0 would otherwise
+        // deliver two unusable fragments as a finished download.
+        if (/won't be merged|not installed/i.test(stderr)) {
+          reject(
+            new Error(
+              'ffmpeg is unavailable, so video and audio could not be combined. ' +
+                'Install ffmpeg, or set its path in Settings.',
+            ),
+          );
+          return;
+        }
+        resolve({ filePath: finalPath });
       });
     });
   }

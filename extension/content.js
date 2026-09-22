@@ -17,6 +17,16 @@
   if (window.__idmNextInjected) return;
   window.__idmNextInjected = true;
 
+  /**
+   * Detection runs in every frame, but the panel belongs to the top one only.
+   *
+   * A panel inside an iframe reads that frame's location, so "download this
+   * page" would hand the app an embed or an ad URL instead of the page the
+   * user is looking at — which is how a click produced a completely unrelated
+   * video.
+   */
+  const IS_TOP = window.top === window;
+
   const Z = '2147483647';
   const reported = new Set();
   /** Panels currently on the page, so a refresh can re-render their lists. */
@@ -216,6 +226,8 @@
     .n { color: #6b7483; font-variant-numeric: tabular-nums; flex: none; }
     .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .empty { padding: 11px 12px; color: #9aa3b2; font-size: 11.5px; line-height: 1.5; }
+    .empty.err { color: #f2684f; }
+    .empty.loading { color: #7aa2ff; }
     .fallback { align-items: flex-start; }
     .fallback strong { font-weight: 600; }
     .fallback .hint { color: #9aa3b2; font-size: 11px; }
@@ -387,6 +399,7 @@
       e.preventDefault();
       e.stopPropagation();
       menu.classList.toggle('open');
+      if (menu.classList.contains('open') && items.length === 0) renderQualities();
     });
 
     root.querySelector('.close').addEventListener('click', (e) => {
@@ -404,6 +417,92 @@
       flash(`✓ Queued ${items.length}`);
     });
 
+    let qualityState = { kind: 'idle' };
+
+    /**
+     * Ask the app what the page offers, and show it.
+     *
+     * Sniffed URLs are the fast path; when there are none — which is every
+     * modern streaming site — this is the list that matters. Each entry is a
+     * complete choice that plays with sound, because the app pairs video-only
+     * renditions with an audio track.
+     */
+    function renderQualities() {
+      if (qualityState.kind === 'idle') {
+        qualityState = { kind: 'loading' };
+        chrome.runtime
+          .sendMessage({ type: 'extract', url: location.href })
+          .then((res) => {
+            qualityState = res?.ok
+              ? { kind: 'ready', qualities: res.qualities ?? [], title: res.title }
+              : { kind: 'error', message: res?.error ?? 'Could not read this page' };
+            renderQualities();
+          })
+          .catch(() => {
+            qualityState = { kind: 'error', message: 'IDM-Next is not running' };
+            renderQualities();
+          });
+      }
+
+      list.textContent = '';
+
+      if (qualityState.kind === 'loading') {
+        list.appendChild(note('Reading this page…', 'loading'));
+        return;
+      }
+
+      if (qualityState.kind === 'error') {
+        list.appendChild(note(qualityState.message, 'err'));
+        list.appendChild(note('Make sure the IDM-Next app is running.', 'hint'));
+        return;
+      }
+
+      const qualities = qualityState.qualities ?? [];
+      if (qualities.length === 0) {
+        list.appendChild(note('No downloadable video found on this page.', 'hint'));
+        return;
+      }
+
+      qualities.forEach((q, i) => {
+        const li = document.createElement('li');
+        const n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = `${i + 1}.`;
+
+        const d = document.createElement('span');
+        d.className = 'desc';
+        const bits = [q.label, `${(q.ext || 'mp4').toUpperCase()} file`];
+        if (q.filesize) bits.push(humanSize(q.filesize));
+        d.textContent = bits.join(', ');
+
+        li.append(n, d);
+        li.addEventListener('click', (e) => {
+          e.stopPropagation();
+          chrome.runtime
+            .sendMessage({
+              type: 'download',
+              url: location.href,
+              pageUrl: location.href,
+              filename: '',
+              formatId: q.formatId,
+            })
+            .then((res) =>
+              flash(res?.ok ? `\u2713 ${q.label} sent to IDM-Next` : '\u2717 IDM-Next not running'),
+            )
+            .catch(() => flash('\u2717 Failed'));
+          menu.classList.remove('open');
+        });
+        list.appendChild(li);
+      });
+    }
+
+    function note(text, cls) {
+      const li = document.createElement('li');
+      li.className = `empty ${cls ?? ''}`;
+      li.textContent = text;
+      return li;
+    }
+
     const render = (next, context = {}) => {
       items = next;
       lastRejects = context.rejects ?? [];
@@ -414,32 +513,7 @@
 
       list.textContent = '';
       if (items.length === 0) {
-        // A dead end is the wrong answer here. Modern streaming sites —
-        // YouTube above all — serve media over transports whose URLs cannot be
-        // replayed on their own, so sniffing finds nothing no matter how long
-        // the video plays. Page-level extraction is the route that works, so
-        // offer it rather than reporting failure.
-        const li = document.createElement('li');
-        li.className = 'fallback';
-        li.innerHTML =
-          '<span class="n">&#9733;</span><span class="desc">' +
-          '<strong>Analyse this page</strong><br>' +
-          '<span class="hint">Reads the page with yt-dlp to find every quality, ' +
-          'including HD with sound.</span></span>';
-        li.addEventListener('click', (e) => {
-          e.stopPropagation();
-          sendPage();
-        });
-        list.appendChild(li);
-
-        if (lastRejects.length > 0) {
-          const note = document.createElement('li');
-          note.className = 'empty';
-          note.textContent = sabrSeen
-            ? 'This site streams over a transport whose URLs cannot be downloaded directly.'
-            : `${lastRejects.length} media response(s) seen but not offered — open the extension popup for details.`;
-          list.appendChild(note);
-        }
+        renderQualities();
         return;
       }
       items.forEach((item, i) => {
@@ -509,7 +583,7 @@
   /* ---------------------------- orchestration ---------------------------- */
 
   function attachMediaPanel(media) {
-    if (media.__idmPanel || dismissed.has(media)) return;
+    if (!IS_TOP || media.__idmPanel || dismissed.has(media)) return;
     const kind = media.tagName === 'AUDIO' ? 'audio' : 'video';
     const panel = createPanel({ anchor: media, labelFor: () => `Download this ${kind}` });
     media.__idmPanel = panel;
@@ -531,7 +605,7 @@
     // Only when there is something to offer and no player to anchor to —
     // otherwise the media panel already covers it.
     const hasMedia = document.querySelector('video, audio') !== null;
-    if (hasMedia || items.length === 0 || pageDismissed) {
+    if (!IS_TOP || hasMedia || items.length === 0 || pageDismissed) {
       if (pagePanel) {
         pagePanel.host.remove();
         panels.delete(pagePanel);
@@ -633,4 +707,15 @@
   // A <video> only learns its dimensions once metadata arrives.
   document.addEventListener('loadedmetadata', scheduleScan, true);
   document.addEventListener('play', scheduleScan, true);
+
+  // Streaming sites navigate without reloading, so the document — and every
+  // panel on it — would otherwise still describe the previous video.
+  let lastUrl = location.href;
+  setInterval(() => {
+    if (location.href === lastUrl) return;
+    lastUrl = location.href;
+    reported.clear();
+    for (const panel of panels) panel.resetQualities();
+    scheduleScan();
+  }, 700);
 })();

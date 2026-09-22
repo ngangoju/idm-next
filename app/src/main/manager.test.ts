@@ -10,7 +10,7 @@ import { join, basename } from 'node:path';
 import { once } from 'node:events';
 
 import { Store } from './store.ts';
-import { DownloadManager } from './manager.ts';
+import { DownloadManager, isIntermediate } from './manager.ts';
 import { categoryFor } from '../shared/protocol.ts';
 import { startFixture, makeBody, sha256 } from '../../../core/test/fixture-server.ts';
 import { hashFile } from '@idm-next/core';
@@ -177,6 +177,21 @@ describe('repeat downloads of the same stream', () => {
       ['stream (1).mp4', 'stream (2).mp4', 'stream.mp4'],
     );
     await manager.shutdown();
+  });
+});
+
+describe('picking yt-dlp\'s output', () => {
+  test('tells an intermediate stream from a merged result', () => {
+    // yt-dlp writes NAME.f<id>.ext per stream and NAME.ext for the merge.
+    // Confusing the two kept the audio track and deleted the finished video,
+    // so a 1080p download completed as a .m4a.
+    assert.equal(isIntermediate('Big Buck Bunny.f140.m4a'), true);
+    assert.equal(isIntermediate('Big Buck Bunny.f278.webm'), true);
+    assert.equal(isIntermediate('Big Buck Bunny.mp4'), false);
+    assert.equal(isIntermediate('Big Buck Bunny.f140.mp4.mkv'), false);
+    assert.equal(isIntermediate('report.pdf'), false);
+    // A dot-heavy title must not be mistaken for a stream marker.
+    assert.equal(isIntermediate('S01.E02.1080p.mkv'), false);
   });
 });
 

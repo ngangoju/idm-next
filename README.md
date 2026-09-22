@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 157 tests across core, app and extension
+npm test           # 159 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 npm run bench -w core   # measure download throughput
@@ -74,6 +74,13 @@ it rejects every real video for being too small. And an attachment only counts
 as a download if it actually names a file: subtitle and telemetry endpoints are
 served with `Content-Disposition: attachment` and would otherwise fill the panel
 with 1 KB JSON while the video went missing.
+
+**Picking a quality.** The panel lists one complete choice per resolution —
+1080p, 720p, 480p — with its size, and every one plays with sound. That is not
+free: above 720p YouTube publishes video and audio as separate formats, so a
+list built straight from yt-dlp's `formats` offers "1080p" entries that download
+silent. Each choice pairs a video rendition with the best audio track and asks
+for the merge.
 
 **When sniffing cannot work.** Modern streaming transports — YouTube's
 SABR/UMP above all — multiplex video and audio into one stream requested with a

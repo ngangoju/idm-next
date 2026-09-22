@@ -6,7 +6,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
-import { mkdir, readdir, rename, rm } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { exec } from 'node:child_process';
 import {
   Download,
@@ -231,7 +231,7 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       const staging = join(record.destDir, `.idm-staging-${record.id}`);
       await mkdir(staging, { recursive: true });
 
-      const { filePath: staged } = await this.ytdlp.download({
+      await this.ytdlp.download({
         url: record.url,
         destDir: staging,
         ...(record.formatId ? { formatId: record.formatId } : {}),
@@ -252,17 +252,15 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
 
       this.external.delete(record.id);
 
-      // --print after_move can stay silent (a skipped or already-present file),
-      // so fall back to whatever actually landed in staging rather than
-      // reporting a completed download with no file and no size.
-      let produced = staged;
-      if (!produced) {
-        const entries = await readdir(staging).catch(() => [] as string[]);
-        const first = entries.find((e) => !e.startsWith('.'));
-        if (first) produced = join(staging, first);
-      }
-
-      if (!produced) throw new Error('yt-dlp produced no file');
+      // Trust the staging directory, not the printed path.
+      //
+      // --print after_move can stay silent (a skipped file), and it can also
+      // name a path that no longer exists — a merge renames its inputs, and
+      // any stdout line beginning with a slash looks like a path. Renaming a
+      // file we never confirmed produced "ENOENT: no such file or directory"
+      // at the very end of an otherwise successful download.
+      const produced = await resolveProduced(staging);
+      if (!produced) throw new Error('yt-dlp finished but produced no file');
 
       await remuxIfMislabelled(
         produced,
@@ -524,6 +522,51 @@ export function looksLikePage(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * yt-dlp names each downloaded stream `NAME.f<id>.ext` and the merged result
+ * `NAME.ext`. Telling them apart is what stops us from keeping the audio track
+ * and deleting the finished video.
+ */
+export function isIntermediate(filename: string): boolean {
+  return /\.f\d+\.[^.]+$/i.test(filename);
+}
+
+/**
+ * The file yt-dlp actually left behind.
+ *
+ * The path printed by --print after_move cannot be trusted for a merge: it is
+ * printed once per downloaded stream, so the last one is an intermediate.
+ * Renaming that out of staging and deleting the rest threw away the merged
+ * video and kept the audio track — a "completed" download that was a .m4a.
+ *
+ * So the merged output wins whenever one exists, and intermediates are only
+ * considered when the merge did not happen at all.
+ */
+async function resolveProduced(staging: string): Promise<string | null> {
+  const found: { path: string; size: number }[] = [];
+
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+        continue;
+      }
+      // yt-dlp's in-progress scratch files.
+      if (/\.(part|ytdl|temp)$/i.test(entry.name)) continue;
+      const size = await stat(full).then((st) => st.size).catch(() => 0);
+      found.push({ path: full, size });
+    }
+  };
+  await walk(staging);
+  if (found.length === 0) return null;
+
+  const merged = found.filter((f) => !isIntermediate(basename(f.path)));
+  const pool = merged.length > 0 ? merged : found;
+  return pool.sort((a, b) => b.size - a.size)[0]!.path;
 }
 
 function guessName(url: string): string {

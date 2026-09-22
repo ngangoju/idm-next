@@ -395,6 +395,24 @@ export async function callApp(path, body) {
   return res.json();
 }
 
+/**
+ * Ask the app what qualities a page offers.
+ *
+ * This is the only route that works on a site whose media URLs are not
+ * fetchable on their own, and it is also the only one that can promise sound
+ * with HD — the app pairs video-only renditions with an audio track.
+ */
+export async function extractQualities(pageUrl) {
+  const res = await fetch(`${API}/extract`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ url: pageUrl }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body?.error ?? `extraction failed (${res.status})`);
+  return body;
+}
+
 export async function appIsRunning() {
   try {
     const res = await fetch(`${API}/health`, { signal: AbortSignal.timeout(1500) });
