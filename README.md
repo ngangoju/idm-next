@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 173 tests across core, app and extension
+npm test           # 178 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 npm run bench -w core   # measure download throughput
@@ -74,6 +74,14 @@ it rejects every real video for being too small. And an attachment only counts
 as a download if it actually names a file: subtitle and telemetry endpoints are
 served with `Content-Disposition: attachment` and would otherwise fill the panel
 with 1 KB JSON while the video went missing.
+
+**Naming what it found.** CDNs name media with signed opaque tokens —
+Instagram's look like `AQMOZ1cfHZuJEuODZ770FSIURCg9L7NMAYjQnJSRDfdCrj4lFYNqzU`
+— so the panel falls back to the page's own title whenever the filename would
+tell the user nothing. Deduplication keeps only the parameters that identify
+*which* file is being requested and discards the rest, because a CDN URL is
+mostly signature and routing: one Instagram clip arrived as thirty-seven
+requests differing only in `oh`, `oe` and a byte range.
 
 **Picking a quality.** The panel lists one complete choice per resolution —
 1080p, 720p, 480p — with its size, and every one plays with sound. That is not

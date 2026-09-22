@@ -33,15 +33,22 @@ export const ARCHIVE_EXTENSIONS = [
  */
 export const MIN_MEDIA_BYTES = 200 * 1024;
 
-/** Query parameters that change per request and would defeat deduplication. */
-const VOLATILE_PARAMS = [
-  'range', 'start', 'end', 'offset', 'seek', 't', 'time', 'timestamp',
-  '_', 'cachebust', 'sig', 'signature', 'expires', 'token', 'nonce', 'bytestart', 'byteend',
-  // Streaming players re-request the same rendition constantly with a moving
-  // range and a request counter; without these one video becomes fifty rows.
-  'rn', 'rbuf', 'cpn', 'ver', 'cver', 'alr', 'gir', 'dur', 'lmt', 'keepalive',
-  'ratebypass', 'pcm2cms', 'aitags', 'requiressl', 'ei', 'ip', 'initcwndbps',
-];
+/**
+ * Query parameters that genuinely identify *which* file is being requested.
+ *
+ * The list is an allowlist rather than a blocklist because CDN URLs are mostly
+ * signature and routing: Instagram alone carries oh, oe, efg, ccb, bytestart,
+ * byteend and a dozen _nc_* parameters, all of which change per request. A
+ * blocklist has to guess them all, and each one it misses becomes another
+ * duplicate row — which is how one video became thirty-seven.
+ */
+const IDENTITY_PARAMS = ['itag', 'quality', 'res', 'resolution', 'format', 'fmt', 'type', 'vq'];
+
+/** Endpoint names shared by every file on a site, so they identify nothing. */
+const GENERIC_NAMES = new Set([
+  'videoplayback', 'watch', 'download', 'index', 'master', 'playlist',
+  'video', 'audio', 'media', 'file', 'stream', 'play', 'get', 'v', 'dl',
+]);
 
 /**
  * Endpoints that are never a download, however they are labelled.
@@ -143,17 +150,53 @@ export function dedupeKey(rawUrl) {
   try {
     const u = new URL(rawUrl);
 
-    // When a URL identifies its rendition with an itag, that is the identity:
-    // everything else on a googlevideo URL is per-request noise.
-    const itag = u.searchParams.get('itag');
-    if (itag) return `${u.origin}${u.pathname}#itag=${itag}`;
+    // Keep only the parameters that say which file this is; the path plus
+    // those is the identity, and everything else is per-request noise.
+    const identity = IDENTITY_PARAMS.map((p) => {
+      const v = u.searchParams.get(p);
+      return v === null ? null : `${p}=${v}`;
+    }).filter(Boolean);
 
-    for (const p of VOLATILE_PARAMS) u.searchParams.delete(p);
-    return `${u.origin}${u.pathname}?${u.searchParams.toString()}`;
+    return `${u.origin}${u.pathname}${identity.length ? `#${identity.join('&')}` : ''}`;
   } catch {
     return rawUrl;
   }
 }
+
+/**
+ * Is this filename meaningless to a person?
+ *
+ * CDNs name media with signed opaque blobs — Instagram's look like
+ * "AQMOZ1cfHZuJEuODZ770FSIURCg9L7NMAYjQnJSRDfdCrj4lFYNqzU". Listing thirty of
+ * those gives the user nothing to choose between, so the page title is a
+ * better label even though it is less specific.
+ */
+export function looksOpaqueName(name) {
+  if (!name) return true;
+
+  const stem = name.includes('.') ? name.slice(0, name.lastIndexOf('.')) : name;
+
+  // Endpoint names that every file on a site shares. Short, so the
+  // length-based checks below would never catch them.
+  if (GENERIC_NAMES.has(stem.toLowerCase())) return true;
+
+  if (stem.length < 16) return false;
+
+  // A UUID is an identifier however it is punctuated.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stem)) return true;
+
+  // Otherwise judge the longest unbroken run. A real name breaks into short
+  // words — "annual-report-2026", "ubuntu-24.04-desktop" — while a CDN token
+  // is one long random stretch, even when it happens to contain an underscore.
+  const longest = stem.split(/[\s._-]+/).reduce((a, b) => (b.length > a.length ? b : a), '');
+  if (longest.length < 16) return false;
+
+  const hasUpper = /[A-Z]/.test(longest);
+  const hasLower = /[a-z]/.test(longest);
+  const hasDigit = /\d/.test(longest);
+  return (hasUpper && hasLower && hasDigit) || /^[0-9a-f]{20,}$/i.test(longest);
+}
+
 
 export function extensionOf(rawUrl) {
   try {

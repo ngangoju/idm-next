@@ -412,6 +412,22 @@
     });
 
     let qualityState = { kind: 'idle' };
+    /** The sniffed list is capped until the user asks for the rest. */
+    let expanded = false;
+
+    /** The "just get the video on this page" row, at the top of the list. */
+    function analyseOption() {
+      const li = document.createElement('li');
+      li.className = 'fallback';
+      li.innerHTML =
+        '<span class="n">&#9733;</span><span class="desc"><strong>Analyse this page</strong><br>' +
+        '<span class="hint">Find the actual video and let me pick a quality.</span></span>';
+      li.addEventListener('click', (e) => {
+        e.stopPropagation();
+        renderQualities();
+      });
+      return li;
+    }
 
     /**
      * Ask the app what the page offers, and show it.
@@ -523,7 +539,17 @@
         renderQualities();
         return;
       }
-      items.forEach((item, i) => {
+
+      // Always offer the unambiguous route first. Sniffed CDN files cannot say
+      // which clip on a feed page you are actually watching, and on a site
+      // like Instagram they arrive as signed tokens with no quality at all —
+      // so "the video on this page, at a quality I pick" has to be one click
+      // away even when there are files to list.
+      list.appendChild(analyseOption());
+
+      const CAP = 8;
+      const shown = expanded ? items : items.slice(0, CAP);
+      shown.forEach((item, i) => {
         const li = document.createElement('li');
         const n = document.createElement('span');
         n.className = 'n';
@@ -539,6 +565,18 @@
         });
         list.appendChild(li);
       });
+
+      if (!expanded && items.length > CAP) {
+        const more = document.createElement('li');
+        more.className = 'empty';
+        more.textContent = `Show all ${items.length} files…`;
+        more.addEventListener('click', (e) => {
+          e.stopPropagation();
+          expanded = true;
+          render(items, { rejects: lastRejects, sabr: sabrSeen });
+        });
+        list.appendChild(more);
+      }
     };
 
     const place = () => {

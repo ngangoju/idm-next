@@ -13,6 +13,7 @@ import {
   MEDIA_EXTENSIONS,
   ARCHIVE_EXTENSIONS,
   classify,
+  looksOpaqueName,
   looksMediaAdjacent,
   isUnfetchableStream,
   recordReject,
@@ -93,15 +94,16 @@ async function recordIfMedia(details) {
   try {
     const tab = await chrome.tabs.get(details.tabId);
     pageUrl = tab.url ?? '';
-    pageTitle = tab.title ? tab.title.replace(/\s*-\s*YouTube$/i, '').trim() : '';
+    pageTitle = cleanPageTitle(tab.title ?? '');
   } catch {
     return; // tab gone
   }
 
+  // A CDN blob name is not a label a person can choose between, so fall back
+  // to the page's own title. Instagram serves every clip as a signed opaque
+  // token; thirty rows of those tell the user nothing.
   const rawFilename = filenameOf(details.url);
-  const title = (rawFilename === 'videoplayback' || rawFilename === 'download' || !rawFilename)
-    ? (pageTitle || rawFilename || 'download')
-    : rawFilename;
+  const title = looksOpaqueName(rawFilename) && pageTitle ? pageTitle : rawFilename;
 
   await addDetection(details.tabId, {
     url: details.url,
@@ -114,6 +116,19 @@ async function recordIfMedia(details) {
     detectedAt: Date.now(),
   });
   notifyTab(details.tabId);
+}
+
+/**
+ * A tab title with the site's own branding trimmed off.
+ *
+ * "Clip • Instagram" and "Something - YouTube" are the page's name for the
+ * media once the suffix is gone, which is what the list should say.
+ */
+function cleanPageTitle(raw) {
+  return raw
+    .replace(/\s*[-–—|•·]\s*(YouTube|Instagram|Vimeo|Facebook|X|Twitter|TikTok|Reddit)\s*$/i, '')
+    .replace(/^\(\d+\)\s*/, '')
+    .trim();
 }
 
 /**

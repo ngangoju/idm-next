@@ -9,6 +9,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   classify,
+  looksOpaqueName,
   isUnfetchableStream,
   looksMediaAdjacent,
   shouldRecord,
@@ -469,5 +470,61 @@ describe('isUnfetchableStream', () => {
     assert.equal(isUnfetchableStream('application/vnd.yt-ump; charset=utf-8'), true);
     assert.equal(isUnfetchableStream('video/mp4'), false);
     assert.equal(isUnfetchableStream(null), false);
+  });
+});
+
+
+/**
+ * Instagram serves every clip from a CDN path whose name is a signed opaque
+ * token, with the rest of the identity in per-request parameters. The panel
+ * listed thirty-seven rows of unreadable tokens, several of them the same
+ * file, with nothing to choose between them.
+ */
+describe('Instagram reel page', () => {
+  const BLOB = 'AQMOZ1cfHZuJEuODZ770FSIURCg9L7NMAYjQnJSRDfdCrj4lFYNqzU';
+  const base = `https://instagram.fcmn1-1.fna.fbcdn.net/o1/v/t16/f2/m86/${BLOB}.mp4`;
+  const withParams = (extra) =>
+    `${base}?efg=eyJ2ZW5jIjoiSEVWQyJ9&_nc_cat=103&_nc_ht=instagram.fcmn1-1.fna.fbcdn.net` +
+    `&_nc_gid=abc123&oh=00_AfMxyz&oe=68B12345${extra}`;
+
+  test('every ranged request for one clip collapses to a single row', () => {
+    // Items 1 and 4 in the report were the same file, twice.
+    const requests = [
+      withParams('&bytestart=0&byteend=65535'),
+      withParams('&bytestart=65536&byteend=131071'),
+      withParams('&bytestart=900000&byteend=999999&_nc_gid=different'),
+      withParams('&oh=00_AfDifferentSignature&oe=68B99999'),
+    ];
+    const keys = new Set(requests.map(dedupeKey));
+    assert.equal(keys.size, 1, `expected one row, got ${keys.size}`);
+  });
+
+  test('two different clips stay apart', () => {
+    const other = base.replace(BLOB, 'AQOB6BKJRwmFudItVrh0vk0a1mV4Arh6M');
+    assert.notEqual(dedupeKey(withParams('')), dedupeKey(`${other}?oh=00_Af`));
+  });
+
+  test('the CDN token is recognised as no name at all', () => {
+    assert.equal(looksOpaqueName(`${BLOB}.mp4`), true);
+    assert.equal(looksOpaqueName('AQOB6BKJRwmFudItVrh0vk0a1mV4Arh6M_psFVYjptiv475yADDLKslv'), true);
+    assert.equal(looksOpaqueName('3f8a91c4b7e25d06a1f3c8b9e4d7a250'), true);
+    assert.equal(looksOpaqueName('a1b2c3d4-e5f6-7890-abcd-ef1234567890'), true);
+  });
+
+  test('a real filename is left alone', () => {
+    // The page title must not replace a name that already means something.
+    assert.equal(looksOpaqueName('Big Buck Bunny 1080p.mp4'), false);
+    assert.equal(looksOpaqueName('annual-report-2026.pdf'), false);
+    assert.equal(looksOpaqueName('ubuntu-24.04-desktop-amd64.iso'), false);
+    assert.equal(looksOpaqueName('S01E02.mkv'), false);
+    assert.equal(looksOpaqueName('song.mp3'), false);
+  });
+
+  test('shared endpoint names count as no name', () => {
+    // Short enough to slip past the length checks, and every file on the site
+    // shares them.
+    for (const n of ['videoplayback', 'watch', 'index.m3u8', 'master.mpd', 'download']) {
+      assert.equal(looksOpaqueName(n), true, n);
+    }
   });
 });
