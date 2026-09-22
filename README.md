@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 146 tests across core, app and extension
+npm test           # 157 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 npm run bench -w core   # measure download throughput
@@ -74,6 +74,15 @@ it rejects every real video for being too small. And an attachment only counts
 as a download if it actually names a file: subtitle and telemetry endpoints are
 served with `Content-Disposition: attachment` and would otherwise fill the panel
 with 1 KB JSON while the video went missing.
+
+**When sniffing cannot work.** Modern streaming transports — YouTube's
+SABR/UMP above all — multiplex video and audio into one stream requested with a
+signed body, so no URL on the page is downloadable on its own. Watching response
+headers finds nothing there however long the video plays, and that is by design,
+not a bug to fix. The panel says so and offers page-level extraction through
+yt-dlp instead, which is the route that works. When a response is turned down
+for any other reason, the popup lists what arrived and why, because "nothing
+detected" is not a diagnosis.
 
 **Download takeover that cannot lose a download.** `chrome.downloads.cancel()`
 is irreversible, and a signed or one-time URL 403s when replayed. So the

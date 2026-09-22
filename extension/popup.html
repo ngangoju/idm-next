@@ -41,6 +41,21 @@
       footer { padding: 9px 13px; border-top: 1px solid #2b3038; display: flex; gap: 8px; }
       footer button { flex: 1; background: #21252c; }
       .warn { padding: 9px 13px; background: #3a2f1e; color: #e0a33e; font-size: 11.5px; }
+      .diagnosis {
+        padding: 11px 13px; border-top: 1px solid #21252c;
+        font-size: 11.5px; color: #8d95a3; line-height: 1.55;
+      }
+      .diagnosis strong { color: #e6e9ef; display: block; margin-bottom: 5px; }
+      .diagnosis p { margin: 7px 0 0; }
+      .diagnosis em { color: #e6e9ef; font-style: normal; font-weight: 600; }
+      ul.rejects { list-style: none; margin: 7px 0 0; padding: 0; }
+      ul.rejects li {
+        display: grid; grid-template-columns: 1fr auto; gap: 2px 8px;
+        padding: 5px 0; border-bottom: 1px solid #1a1e26;
+      }
+      .rj-host { color: #e6e9ef; overflow: hidden; text-overflow: ellipsis; }
+      .rj-ct { color: #6b7483; font-size: 10.5px; text-align: right; }
+      .rj-why { grid-column: 1 / -1; color: #e0a33e; font-size: 10.5px; }
     </style>
   </head>
   <body>
@@ -56,6 +71,7 @@
     <div class="empty" id="empty" hidden>
       Nothing detected on this page yet.<br />Start playing a video, or reload the page.
     </div>
+    <div class="diagnosis" id="diagnosis" hidden></div>
     <footer>
       <button id="all">Download all</button>
       <button id="page">Send page to IDM-Next</button>

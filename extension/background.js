@@ -12,8 +12,14 @@
 import {
   MEDIA_EXTENSIONS,
   ARCHIVE_EXTENSIONS,
-  shouldRecord,
+  classify,
+  looksMediaAdjacent,
+  isUnfetchableStream,
+  recordReject,
+  getRejects,
   parseContentRangeTotal,
+  parseClen,
+  isRangedUrl,
   addDetection,
   clearDetections,
   getDetections,
@@ -45,37 +51,63 @@ async function recordIfMedia(details) {
   const contentType = (headers['content-type'] ?? '').split(';')[0].trim();
 
   // Content-Length describes this response; on a ranged request that is one
-  // chunk of the file, not the file. Streaming players fetch media in small
-  // ranges, so judging by Content-Length rejected every real video for being
-  // too small. Content-Range carries the only true total.
+  // chunk of the file, not the file. Content-Range and clen carry the true total.
+  // Priority: Content-Range total -> clen -> Content-Length (narrow exemption
+  // if chunk with no known total).
   const total = parseContentRangeTotal(headers['content-range']);
+  const clen = parseClen(details.url);
   const length = headers['content-length'] ? Number(headers['content-length']) : null;
-  const size = total ?? length;
+  const isChunk = isRangedUrl(details.url) || Boolean(headers['content-range']);
+  const size = total ?? clen ?? (isChunk ? null : length);
 
-  if (!shouldRecord({
+  const verdict = classify({
     url: details.url,
     contentType,
     size,
     contentDisposition: headers['content-disposition'],
-  })) {
+  });
+
+  if (!verdict.ok) {
+    // Keep media-adjacent rejections so the popup can explain an empty panel
+    // instead of leaving the user to guess.
+    if (looksMediaAdjacent(details.url, contentType)) {
+      await recordReject(details.tabId, {
+        url: details.url,
+        contentType: contentType || null,
+        reason: verdict.reason,
+        at: Date.now(),
+      });
+      if (isUnfetchableStream(contentType)) {
+        await chrome.storage.session.set({ [`sabr:${details.tabId}`]: true });
+        notifyTab(details.tabId);
+      }
+    }
     return;
   }
 
   const manifest = isManifest(details.url, contentType);
 
   let pageUrl = '';
+  let pageTitle = '';
   try {
-    pageUrl = (await chrome.tabs.get(details.tabId)).url ?? '';
+    const tab = await chrome.tabs.get(details.tabId);
+    pageUrl = tab.url ?? '';
+    pageTitle = tab.title ? tab.title.replace(/\s*-\s*YouTube$/i, '').trim() : '';
   } catch {
     return; // tab gone
   }
+
+  const rawFilename = filenameOf(details.url);
+  const title = (rawFilename === 'videoplayback' || rawFilename === 'download' || !rawFilename)
+    ? (pageTitle || rawFilename || 'download')
+    : rawFilename;
 
   await addDetection(details.tabId, {
     url: details.url,
     kind: kindOf(details.url, contentType),
     contentType: contentType || null,
     size: Number.isFinite(size) ? size : null,
-    title: filenameOf(details.url),
+    title,
     pageUrl,
     isManifest: manifest,
     detectedAt: Date.now(),
@@ -125,7 +157,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'list') {
     void (async () => {
       const tabId = msg.tabId ?? sender.tab?.id;
-      sendResponse({ items: tabId === undefined ? [] : await getDetections(tabId) });
+      if (tabId === undefined) return sendResponse({ items: [], rejects: [], sabr: false });
+      const store = await chrome.storage.session.get(`sabr:${tabId}`);
+      sendResponse({
+        items: await getDetections(tabId),
+        rejects: await getRejects(tabId),
+        sabr: Boolean(store[`sabr:${tabId}`]),
+      });
     })();
     return true;
   }
@@ -206,11 +244,36 @@ export async function startDownload(url, pageUrl, filename) {
   }
 
   const headers = await contextHeadersFor(url, pageUrl);
+
+  let downloadUrl = url;
+  let useYtdlp = undefined;
+  let formatId = undefined;
+
+  try {
+    const u = new URL(url);
+    const itag = u.searchParams.get('itag');
+    const isYt = pageUrl && /https?:\/\/(?:www\.)?youtube\.com\/watch/i.test(pageUrl);
+    if (isYt && itag) {
+      downloadUrl = pageUrl;
+      useYtdlp = true;
+      if (['140', '139', '251', '250'].includes(itag)) {
+        formatId = `${itag}/bestaudio`;
+      } else {
+        // Video itag: mux with best audio so 1080p and adaptive streams have sound!
+        formatId = `${itag}+bestaudio/${itag}`;
+      }
+    }
+  } catch {
+    /* fallback to direct url */
+  }
+
   await callApp('/downloads', {
-    url,
+    url: downloadUrl,
     headers,
     filename: filename || undefined,
     sourcePage: pageUrl || undefined,
+    ...(useYtdlp !== undefined ? { useYtdlp } : {}),
+    ...(formatId !== undefined ? { formatId } : {}),
   });
   return { ok: true };
 }

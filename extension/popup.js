@@ -13,10 +13,14 @@ dotEl.classList.toggle('ok', running);
 statusEl.textContent = running ? 'app connected' : 'app not running';
 warnEl.hidden = running;
 
-const { items } = await chrome.runtime.sendMessage({ type: 'list', tabId: tab?.id });
+const { items, rejects = [], sabr = false } = await chrome.runtime.sendMessage({
+  type: 'list',
+  tabId: tab?.id,
+});
 
 if (!items || items.length === 0) {
   emptyEl.hidden = false;
+  renderDiagnosis();
 } else {
   // Biggest first: on a streaming page the full-quality rendition is almost
   // always the one the user wants, and it is almost always the largest.
@@ -92,4 +96,51 @@ function formatBytes(n) {
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(0)} KB`;
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+
+/**
+ * Explain an empty list instead of leaving the user to guess.
+ *
+ * The interesting case is a page that has plainly been playing video: that
+ * means responses arrived and were turned down, and the reason is actionable.
+ */
+function renderDiagnosis() {
+  const host = document.getElementById('diagnosis');
+  if (!host) return;
+
+  if (sabr) {
+    host.hidden = false;
+    host.innerHTML =
+      '<strong>This site streams over SABR/UMP.</strong>' +
+      '<p>Video and audio are multiplexed into one stream that is requested with ' +
+      'a signed body, so the URL cannot be downloaded on its own. Use ' +
+      '<em>Send page to IDM-Next</em> below — it reads the page with yt-dlp and ' +
+      'gets every quality, including HD with sound.</p>';
+    return;
+  }
+
+  if (rejects.length === 0) return;
+
+  host.hidden = false;
+  const rows = rejects
+    .slice(-8)
+    .map((r) => {
+      const name = (() => {
+        try {
+          return new URL(r.url).hostname;
+        } catch {
+          return r.url.slice(0, 40);
+        }
+      })();
+      return `<li><span class="rj-host">${name}</span>` +
+             `<span class="rj-ct">${r.contentType ?? 'unknown type'}</span>` +
+             `<span class="rj-why">${r.reason}</span></li>`;
+    })
+    .join('');
+
+  host.innerHTML =
+    `<strong>${rejects.length} media response(s) seen but not offered</strong>` +
+    `<ul class="rejects">${rows}</ul>` +
+    '<p>If one of these is the video you want, send me this list.</p>';
 }

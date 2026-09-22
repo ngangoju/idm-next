@@ -24,6 +24,18 @@
   /** Elements the user closed; we do not put the panel back on them. */
   const dismissed = new WeakSet();
   let pageDismissed = false;
+  let savedUserOffset = { x: 0, y: 0 };
+
+  try {
+    chrome.storage?.local?.get('panelPos').then((data) => {
+      if (data?.panelPos && typeof data.panelPos.x === 'number') {
+        savedUserOffset = data.panelPos;
+        for (const p of panels) p.place();
+      }
+    }).catch(() => {});
+  } catch {
+    /* standalone harness */
+  }
 
   /* ------------------------------ labels ------------------------------ */
 
@@ -150,6 +162,9 @@
       font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: #eef1f6;
       user-select: none;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
     }
     .bar {
       display: inline-flex; align-items: center; gap: 8px;
@@ -159,24 +174,26 @@
       padding: 7px 9px;
       box-shadow: 0 4px 18px rgba(0,0,0,.45);
       backdrop-filter: blur(6px);
-      cursor: pointer;
+      cursor: grab;
+      touch-action: none;
       transition: background .13s ease, border-color .13s ease;
     }
     .bar:hover { background: rgba(24,30,40,.97); border-color: rgba(122,162,255,.55); }
+    .bar:active, .bar.dragging { cursor: grabbing; border-color: rgba(122,162,255,.7); }
+    .grip { display: flex; align-items: center; color: #717d91; opacity: 0.6; cursor: grab; padding-right: 1px; }
+    .bar:hover .grip { opacity: 0.95; color: #a4b3ca; }
     .mark { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 5px;
-            background: linear-gradient(145deg,#7aa2ff,#5b8cff); color: #fff; flex: none; }
-    .label { white-space: nowrap; font-weight: 550; }
+            background: linear-gradient(145deg,#7aa2ff,#5b8cff); color: #fff; flex: none; pointer-events: none; }
+    .label { white-space: nowrap; font-weight: 550; pointer-events: none; }
     .count { font-size: 10.5px; color: #9aa3b2; background: rgba(255,255,255,.08);
-             padding: 1px 6px; border-radius: 99px; }
+             padding: 1px 6px; border-radius: 99px; pointer-events: none; }
     .icon-btn { display: grid; place-items: center; width: 18px; height: 18px;
                 border: none; background: none; color: #9aa3b2; cursor: pointer;
                 border-radius: 4px; padding: 0; font: inherit; }
     .icon-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
 
-    .wrap { display: flex; flex-direction: column; align-items: center; }
     .menu {
       margin-top: 5px;
-      align-self: stretch;
       min-width: 320px; max-width: 460px;
       background: rgba(14,17,22,.97);
       border: 1px solid rgba(255,255,255,.14);
@@ -198,7 +215,11 @@
     li:hover { background: rgba(122,162,255,.16); }
     .n { color: #6b7483; font-variant-numeric: tabular-nums; flex: none; }
     .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .empty { padding: 11px 12px; color: #9aa3b2; }
+    .empty { padding: 11px 12px; color: #9aa3b2; font-size: 11.5px; line-height: 1.5; }
+    .fallback { align-items: flex-start; }
+    .fallback strong { font-weight: 600; }
+    .fallback .hint { color: #9aa3b2; font-size: 11px; }
+    .fallback .desc { white-space: normal; }
     .toast { color: #3ecf8e; }
   `;
 
@@ -223,6 +244,16 @@
       <style>${PANEL_CSS}</style>
       <div class="wrap" style="pointer-events:auto">
         <div class="bar" part="bar">
+          <span class="grip" title="Drag to move panel">
+            <svg width="6" height="12" viewBox="0 0 6 12" fill="currentColor">
+              <circle cx="1.5" cy="2" r="1"/>
+              <circle cx="4.5" cy="2" r="1"/>
+              <circle cx="1.5" cy="6" r="1"/>
+              <circle cx="4.5" cy="6" r="1"/>
+              <circle cx="1.5" cy="10" r="1"/>
+              <circle cx="4.5" cy="10" r="1"/>
+            </svg>
+          </span>
           <span class="mark">${svgDown()}</span>
           <span class="label"></span>
           <span class="count" hidden></span>
@@ -245,6 +276,8 @@
     const head = root.querySelector('.menu-head');
 
     let items = [];
+    let lastRejects = [];
+    let sabrSeen = false;
 
     const flash = (text) => {
       const prev = label.textContent;
@@ -254,6 +287,15 @@
         label.textContent = prev;
         label.classList.remove('toast');
       }, 2200);
+    };
+
+    /** Hand the page itself to the app, which resolves it with yt-dlp. */
+    const sendPage = () => {
+      chrome.runtime
+        .sendMessage({ type: 'download', url: location.href, pageUrl: location.href, filename: '' })
+        .then((res) => flash(res?.ok ? '\u2713 Analysing page…' : '\u2717 IDM-Next not running'))
+        .catch(() => flash('\u2717 Failed'));
+      menu.classList.remove('open');
     };
 
     const send = (item) => {
@@ -269,9 +311,73 @@
       menu.classList.remove('open');
     };
 
+    let userOffsetX = savedUserOffset.x || 0;
+    let userOffsetY = savedUserOffset.y || 0;
+
+    let isDragging = false;
+    let hasMoved = false;
+    let startPointerX = 0;
+    let startPointerY = 0;
+    let startOffsetX = 0;
+    let startOffsetY = 0;
+
+    bar.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('.icon-btn')) return; // buttons handle their own clicks
+
+      isDragging = true;
+      hasMoved = false;
+      startPointerX = e.clientX;
+      startPointerY = e.clientY;
+      startOffsetX = userOffsetX;
+      startOffsetY = userOffsetY;
+      try {
+        bar.setPointerCapture(e.pointerId);
+      } catch {}
+    });
+
+    bar.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - startPointerX;
+      const dy = e.clientY - startPointerY;
+      if (!hasMoved && Math.hypot(dx, dy) > 4) {
+        hasMoved = true;
+        bar.classList.add('dragging');
+      }
+      if (hasMoved) {
+        userOffsetX = startOffsetX + dx;
+        userOffsetY = startOffsetY + dy;
+        place();
+      }
+    });
+
+    const stopDrag = (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      bar.classList.remove('dragging');
+      try {
+        bar.releasePointerCapture(e.pointerId);
+      } catch {}
+      if (hasMoved) {
+        savedUserOffset = { x: userOffsetX, y: userOffsetY };
+        try {
+          chrome.storage?.local?.set({ panelPos: savedUserOffset });
+        } catch {}
+      }
+    };
+
+    bar.addEventListener('pointerup', stopDrag);
+    bar.addEventListener('pointercancel', stopDrag);
+
     // Clicking the bar downloads the best candidate; the caret opens the list.
-    // Same split IDM uses, so the common case is one click.
+    // Suppress if the user just completed a drag movement!
     bar.addEventListener('click', (e) => {
+      if (hasMoved) {
+        hasMoved = false;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       if (items.length > 0) send(items[0]);
@@ -298,18 +404,42 @@
       flash(`✓ Queued ${items.length}`);
     });
 
-    const render = (next) => {
+    const render = (next, context = {}) => {
       items = next;
+      lastRejects = context.rejects ?? [];
+      sabrSeen = Boolean(context.sabr);
       label.textContent = labelFor(items);
       count.hidden = items.length < 2;
       count.textContent = String(items.length);
 
       list.textContent = '';
       if (items.length === 0) {
+        // A dead end is the wrong answer here. Modern streaming sites —
+        // YouTube above all — serve media over transports whose URLs cannot be
+        // replayed on their own, so sniffing finds nothing no matter how long
+        // the video plays. Page-level extraction is the route that works, so
+        // offer it rather than reporting failure.
         const li = document.createElement('li');
-        li.className = 'empty';
-        li.textContent = 'Nothing detected yet — start playing the video.';
+        li.className = 'fallback';
+        li.innerHTML =
+          '<span class="n">&#9733;</span><span class="desc">' +
+          '<strong>Analyse this page</strong><br>' +
+          '<span class="hint">Reads the page with yt-dlp to find every quality, ' +
+          'including HD with sound.</span></span>';
+        li.addEventListener('click', (e) => {
+          e.stopPropagation();
+          sendPage();
+        });
         list.appendChild(li);
+
+        if (lastRejects.length > 0) {
+          const note = document.createElement('li');
+          note.className = 'empty';
+          note.textContent = sabrSeen
+            ? 'This site streams over a transport whose URLs cannot be downloaded directly.'
+            : `${lastRejects.length} media response(s) seen but not offered — open the extension popup for details.`;
+          list.appendChild(note);
+        }
         return;
       }
       items.forEach((item, i) => {
@@ -337,6 +467,7 @@
         wrap.style.top = '16px';
         wrap.style.right = '16px';
         wrap.style.left = 'auto';
+        wrap.style.transform = 'none';
         return true;
       }
       const r = anchor.getBoundingClientRect();
@@ -348,15 +479,27 @@
       }
       host.style.display = '';
       wrap.style.position = 'absolute';
-      wrap.style.top = `${window.scrollY + r.top + 10}px`;
-      // Centred over the player, which is where IDM puts it and where it is
-      // least likely to sit on top of the player's own controls.
-      wrap.style.left = `${window.scrollX + r.left + r.width / 2}px`;
-      wrap.style.transform = 'translateX(-50%)';
+      // Docked to the top-right corner of the player (like IDM), plus user drag offset.
+      // transform: translateX(-100%) aligns the right edge of wrap with the calculated target.
+      const baseTop = window.scrollY + r.top + 10;
+      const baseRight = window.scrollX + r.left + r.width - 12;
+
+      wrap.style.top = `${baseTop + userOffsetY}px`;
+      wrap.style.left = `${baseRight + userOffsetX}px`;
+      wrap.style.transform = 'translateX(-100%)';
       return true;
     };
 
-    const panel = { host, render, place, anchor };
+    const panel = {
+      host,
+      render,
+      place,
+      anchor,
+      setOffset: (x, y) => {
+        userOffsetX = x;
+        userOffsetY = y;
+      },
+    };
     document.body.appendChild(host);
     place();
     panels.add(panel);
@@ -404,9 +547,11 @@
 
   async function refresh() {
     let items = [];
+    let context = { rejects: [], sabr: false };
     try {
       const res = await chrome.runtime.sendMessage({ type: 'list' });
       items = res?.items ?? [];
+      context = { rejects: res?.rejects ?? [], sabr: Boolean(res?.sabr) };
     } catch {
       return; // worker restarting
     }
@@ -420,7 +565,7 @@
 
     ensurePagePanel(items);
     for (const panel of panels) {
-      panel.render(items);
+      panel.render(items, context);
       panel.place();
     }
   }

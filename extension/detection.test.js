@@ -8,8 +8,13 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  classify,
+  isUnfetchableStream,
+  looksMediaAdjacent,
   shouldRecord,
   parseContentRangeTotal,
+  parseClen,
+  isRangedUrl,
   dedupeKey,
   kindOf,
   isManifest,
@@ -242,6 +247,13 @@ describe('YouTube watch page', () => {
     assert.equal(shouldRecord({ url: VIDEO, contentType: 'video/mp4', size: 65536 }), false);
   });
 
+  test('records a ranged video chunk using clen when Content-Range is absent (200 OK)', () => {
+    const VIDEO_CLEN = `${VIDEO}&clen=189000000`;
+    const clenSize = parseClen(VIDEO_CLEN);
+    assert.equal(clenSize, 189000000);
+    assert.equal(shouldRecord({ url: VIDEO_CLEN, contentType: 'video/mp4', size: clenSize }), true);
+  });
+
   test('records the audio rendition too', () => {
     assert.equal(
       shouldRecord({
@@ -315,6 +327,27 @@ describe('parseContentRangeTotal', () => {
   });
 });
 
+describe('parseClen and isRangedUrl', () => {
+  test('reads total bytes from clen query parameter', () => {
+    assert.equal(parseClen('https://rr.googlevideo.com/videoplayback?clen=189000000&itag=137'), 189000000);
+    assert.equal(parseClen('https://rr.googlevideo.com/videoplayback?clen=3800000&itag=140'), 3800000);
+  });
+
+  test('returns null when clen is missing or malformed', () => {
+    assert.equal(parseClen('https://x.test/video.mp4'), null);
+    assert.equal(parseClen('https://x.test/video.mp4?clen=abc'), null);
+    assert.equal(parseClen('https://x.test/video.mp4?clen=-5'), null);
+    assert.equal(parseClen('not a url'), null);
+  });
+
+  test('identifies ranged chunk requests', () => {
+    assert.equal(isRangedUrl('https://x.test/video.mp4?range=0-65535'), true);
+    assert.equal(isRangedUrl('https://x.test/video.mp4?bytestart=0'), true);
+    assert.equal(isRangedUrl('https://x.test/video.mp4'), false);
+    assert.equal(isRangedUrl('not a url'), false);
+  });
+});
+
 describe('attachments still work for real downloads', () => {
   test('a CSV export is still offered', () => {
     // The attachment rule exists for this; it just must not admit JSON APIs.
@@ -375,5 +408,66 @@ describe('attachments still work for real downloads', () => {
       }),
       true,
     );
+  });
+});
+
+
+describe('classify: explaining a rejection', () => {
+  test('names SABR/UMP, which is why YouTube can look empty', () => {
+    // Video and audio multiplexed into one POSTed stream: nothing to fetch by
+    // URL, however long the video plays.
+    const v = classify({
+      url: 'https://rr6---sn-x.googlevideo.com/videoplayback?sabr=1',
+      contentType: 'application/vnd.yt-ump',
+      size: 500000,
+    });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /SABR|UMP/i);
+  });
+
+  test('names the size floor when that is the cause', () => {
+    const v = classify({ url: 'https://x.test/a.mp4', contentType: 'video/mp4', size: 9000 });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /size floor/i);
+  });
+
+  test('names telemetry endpoints', () => {
+    const v = classify({
+      url: 'https://www.youtube.com/api/timedtext?v=x',
+      contentType: 'application/json',
+      size: 1024,
+      contentDisposition: 'attachment',
+    });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /telemetry|subtitle/i);
+  });
+
+  test('accepts a real stream with no reason attached', () => {
+    const v = classify({ url: 'https://x.test/a.mp4', contentType: 'video/mp4', size: 90_000_000 });
+    assert.equal(v.ok, true);
+    assert.equal(v.reason, '');
+  });
+});
+
+describe('looksMediaAdjacent: what is worth reporting', () => {
+  test('media types and media hosts are', () => {
+    assert.equal(looksMediaAdjacent('https://x.test/a', 'video/mp4'), true);
+    assert.equal(looksMediaAdjacent('https://x.test/a', 'audio/mp4'), true);
+    assert.equal(looksMediaAdjacent('https://rr6---sn-x.googlevideo.com/videoplayback', null), true);
+    assert.equal(looksMediaAdjacent('https://x.test/clip.mkv', null), true);
+  });
+
+  test('a stylesheet is not', () => {
+    // A rejected stylesheet is noise; reporting it would bury the real clue.
+    assert.equal(looksMediaAdjacent('https://x.test/app.css', 'text/css'), false);
+  });
+});
+
+describe('isUnfetchableStream', () => {
+  test('recognises the UMP content types', () => {
+    assert.equal(isUnfetchableStream('application/vnd.yt-ump'), true);
+    assert.equal(isUnfetchableStream('application/vnd.yt-ump; charset=utf-8'), true);
+    assert.equal(isUnfetchableStream('video/mp4'), false);
+    assert.equal(isUnfetchableStream(null), false);
   });
 });

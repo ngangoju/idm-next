@@ -107,6 +107,32 @@ export function parseContentRangeTotal(header) {
 }
 
 /**
+ * Extract total file size from `clen` parameter if present (common on googlevideo URLs).
+ */
+export function parseClen(rawUrl) {
+  try {
+    const clen = new URL(rawUrl).searchParams.get('clen');
+    if (!clen) return null;
+    const n = Number(clen);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does this URL indicate a ranged chunk request?
+ */
+export function isRangedUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return u.searchParams.has('range') || u.searchParams.has('bytestart');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Key used to deduplicate detections.
  *
  * A player seeking through a video fires dozens of requests that differ only in
@@ -175,7 +201,68 @@ export function kindOf(url, contentType) {
  * positives (ad beacons, tracking pixels, thumbnail sprites) and false
  * negatives (manifests, attachments with no useful content type) live.
  */
-export function shouldRecord({ url, contentType, size, contentDisposition }) {
+/**
+ * Content types that identify media we can see but cannot fetch on our own.
+ *
+ * YouTube's SABR/UMP transport multiplexes video and audio into one stream
+ * requested by POST with a protobuf body, so the URL is not replayable — there
+ * is nothing to hand a downloader. Recognising it is still worth doing: it
+ * tells us to offer page-level extraction instead of pretending to find
+ * nothing.
+ */
+export const UNFETCHABLE_TYPES = ['application/vnd.yt-ump', 'application/x-ump'];
+
+export function isUnfetchableStream(contentType) {
+  const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
+  return UNFETCHABLE_TYPES.includes(ct);
+}
+
+/**
+ * Was this response at least media-adjacent?
+ *
+ * Used to decide whether a rejection is worth reporting. A rejected stylesheet
+ * is noise; a rejected video/mp4 is a clue.
+ */
+export function looksMediaAdjacent(url, contentType) {
+  const ct = (contentType ?? '').toLowerCase();
+  if (ct.startsWith('video/') || ct.startsWith('audio/')) return true;
+  if (isUnfetchableStream(ct)) return true;
+  try {
+    const host = new URL(url).hostname;
+    if (/googlevideo\.com$|\.akamaized\.net$|cdn|media|stream/i.test(host)) return true;
+  } catch {
+    /* unparseable */
+  }
+  return MEDIA_EXTENSIONS.includes(extensionOf(url));
+}
+
+/**
+ * The decision, with the reason for it.
+ *
+ * `shouldRecord` is the boolean form. The reason matters because "nothing was
+ * detected" is not an explanation a user can act on — and on a page that has
+ * clearly been playing video, it is usually wrong in an interesting way.
+ */
+export function classify({ url, contentType, size, contentDisposition }) {
+  const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
+
+  if (isNoiseUrl(url)) return { ok: false, reason: 'telemetry or subtitle endpoint' };
+  if (isUnfetchableStream(ct)) {
+    return { ok: false, reason: 'YouTube SABR/UMP stream — not fetchable by URL' };
+  }
+  if (!shouldRecordInner({ url, contentType, size, contentDisposition })) {
+    const floored =
+      size !== null && size !== undefined && size < MIN_MEDIA_BYTES && ct.startsWith('video/');
+    return { ok: false, reason: floored ? 'below the size floor' : 'not a downloadable type' };
+  }
+  return { ok: true, reason: '' };
+}
+
+export function shouldRecord(input) {
+  return shouldRecordInner(input);
+}
+
+function shouldRecordInner({ url, contentType, size, contentDisposition }) {
   const ct = (contentType ?? '').split(';')[0].trim().toLowerCase();
   const ext = extensionOf(url);
 
@@ -236,8 +323,18 @@ export async function addDetection(tabId, item) {
 
   const idx = existing.findIndex((d) => dedupeKey(d.url) === key);
   if (idx >= 0) {
-    // Keep whichever copy knows more; a later sighting often has the size.
-    existing[idx] = { ...existing[idx], ...item, size: item.size ?? existing[idx].size };
+    // Keep whichever copy knows more; a later sighting often has the size or real title.
+    const prev = existing[idx];
+    const preferredTitle =
+      item.title && item.title !== 'videoplayback' && item.title !== 'download'
+        ? item.title
+        : prev.title;
+    existing[idx] = {
+      ...prev,
+      ...item,
+      size: item.size ?? prev.size,
+      title: preferredTitle || prev.title || item.title,
+    };
   } else {
     existing.push(item);
   }
@@ -250,8 +347,31 @@ export async function addDetection(tabId, item) {
 }
 
 export async function clearDetections(tabId) {
-  await chrome.storage.session.remove(KEY(tabId));
+  await chrome.storage.session.remove([KEY(tabId), REJECT_KEY(tabId)]);
   await updateBadge(tabId, 0);
+}
+
+/* --------------------------- rejection log --------------------------- */
+/*
+ * "Nothing detected" is not a diagnosis. When a page has obviously been
+ * playing video and the panel is empty, the useful question is what arrived
+ * and why it was turned down — so media-adjacent rejections are kept, briefly,
+ * and surfaced in the popup.
+ */
+
+const REJECT_KEY = (tabId) => `rejects:${tabId}`;
+
+export async function getRejects(tabId) {
+  const store = await chrome.storage.session.get(REJECT_KEY(tabId));
+  return store[REJECT_KEY(tabId)] ?? [];
+}
+
+export async function recordReject(tabId, entry) {
+  const existing = await getRejects(tabId);
+  const key = dedupeKey(entry.url);
+  if (existing.some((e) => dedupeKey(e.url) === key)) return;
+  existing.push(entry);
+  await chrome.storage.session.set({ [REJECT_KEY(tabId)]: existing.slice(-25) });
 }
 
 export async function updateBadge(tabId, count) {
