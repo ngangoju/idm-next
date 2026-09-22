@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 159 tests across core, app and extension
+npm test           # 166 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 npm run bench -w core   # measure download throughput

@@ -132,8 +132,11 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
   }
 
   add(req: AddDownloadRequest): DownloadRecord {
-    const filename = req.filename ?? guessName(req.url);
-    const category = categoryFor(filename);
+    const viaYtdlp = req.useYtdlp ?? looksLikePage(req.url);
+    // The last path segment of a page URL is not a filename — every YouTube
+    // download would be called "watch". Say so until yt-dlp reports the title.
+    const filename = req.filename ?? (viaYtdlp ? pageLabel(req.url) : guessName(req.url));
+    const category = viaYtdlp && !req.filename ? 'video' : categoryFor(filename);
     const destDir = req.destDir ?? this.destDirFor(category);
 
     const record: DownloadRecord = {
@@ -157,7 +160,7 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       ...(req.formatId ? { formatId: req.formatId } : {}),
       // An explicit flag wins; otherwise guess from the URL now and correct it
       // from the probe's content type once the download actually starts.
-      useYtdlp: req.useYtdlp ?? looksLikePage(req.url),
+      useYtdlp: viaYtdlp,
     };
 
     this.store.update((s) => {
@@ -236,6 +239,16 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
         destDir: staging,
         ...(record.formatId ? { formatId: record.formatId } : {}),
         signal: controller.signal,
+        onTitle: (title) => {
+          this.store.update((st) => {
+            const d = st.downloads.find((x) => x.id === record.id);
+            if (!d || !title) return;
+            d.filename = title;
+            // "watch" told the user nothing and put every video in Other.
+            if (d.category === 'other') d.category = 'video';
+          });
+          this.dirtyProgress.add(record.id);
+        },
         onProgress: (p) => {
           this.store.update((s) => {
             const d = s.downloads.find((x) => x.id === record.id);
@@ -567,6 +580,16 @@ async function resolveProduced(staging: string): Promise<string | null> {
   const merged = found.filter((f) => !isIntermediate(basename(f.path)));
   const pool = merged.length > 0 ? merged : found;
   return pool.sort((a, b) => b.size - a.size)[0]!.path;
+}
+
+/** A readable stand-in for a page whose title is not known yet. */
+function pageLabel(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    return `Video from ${host}`;
+  } catch {
+    return 'Video';
+  }
 }
 
 function guessName(url: string): string {

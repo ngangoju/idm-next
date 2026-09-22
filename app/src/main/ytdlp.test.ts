@@ -123,10 +123,13 @@ describe('parseExtraction', () => {
     const hd = e.qualities.find((q) => q.height === 1080);
     const hls = e.qualities.find((q) => q.height === 720);
 
-    assert.equal(hd?.formatId, '137+251');
+    // The exact pair leads, with a height-based fallback behind it because a
+    // listed format id can be gone by the time the download runs.
+    assert.ok(hd?.formatId.startsWith('137+251/'), hd?.formatId);
+    assert.match(hd?.formatId ?? '', /bestvideo\[height<=1080\]\+bestaudio/);
     assert.equal(hd?.label, '1080p HD');
     assert.equal(hd?.filesize, 5800);
-    assert.equal(hls?.formatId, 'hls-720');
+    assert.ok(hls?.formatId.startsWith('hls-720/'), hls?.formatId);
     // 1080 (merged), 720 (HLS, already has audio) and 360 (progressive).
     assert.equal(e.qualities.filter((q) => q.height !== null).length, 3);
     // And an audio-only choice alongside them.

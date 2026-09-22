@@ -11,7 +11,7 @@ import { once } from 'node:events';
 
 import { Store } from './store.ts';
 import { DownloadManager, isIntermediate } from './manager.ts';
-import { categoryFor } from '../shared/protocol.ts';
+import { categoryFor, humanizeError } from '../shared/protocol.ts';
 import { startFixture, makeBody, sha256 } from '../../../core/test/fixture-server.ts';
 import { hashFile } from '@idm-next/core';
 
@@ -52,6 +52,71 @@ describe('categorization', () => {
     assert.equal(rec.category, 'video');
     assert.equal(rec.destDir, join(dir, 'dl', 'video'));
     await manager.shutdown();
+  });
+});
+
+describe('naming a page download', () => {
+  test('does not call every YouTube video "watch"', async () => {
+    // The last path segment of a page URL is not a filename. It also put every
+    // video in Other, because "watch" has no extension.
+    const { manager } = await freshManager();
+    const rec = manager.add({ url: 'https://www.youtube.com/watch?v=abc', startPaused: true });
+
+    assert.notEqual(rec.filename, 'watch');
+    assert.match(rec.filename, /youtube\.com/);
+    assert.equal(rec.category, 'video');
+    assert.equal(rec.useYtdlp, true);
+    await manager.shutdown();
+  });
+
+  test('an explicit filename still wins', async () => {
+    const { manager } = await freshManager();
+    const rec = manager.add({
+      url: 'https://www.youtube.com/watch?v=abc',
+      filename: 'My Song.mp4',
+      startPaused: true,
+    });
+    assert.equal(rec.filename, 'My Song.mp4');
+    await manager.shutdown();
+  });
+
+  test('a direct file URL is unaffected', async () => {
+    const { manager } = await freshManager();
+    const rec = manager.add({ url: 'https://x.test/clip.mkv', startPaused: true });
+    assert.equal(rec.filename, 'clip.mkv');
+    assert.equal(rec.useYtdlp, false);
+    await manager.shutdown();
+  });
+});
+
+describe('humanizeError', () => {
+  test('replaces the raw ENOENT the user was shown', () => {
+    const raw =
+      "ENOENT: no such file or directory, rename " +
+      "'/Users/x/Downloads/IDM-Next/other/.idm-staging-0a777b76/Some Video.webm' -> " +
+      "'/Users/x/Downloads/IDM-Next/other/Some Video.webm'";
+    const out = humanizeError(raw);
+    assert.ok(!out.includes('/Users/'), 'must not leak an internal path');
+    assert.ok(out.length < 80, `still too long: ${out}`);
+    assert.match(out, /no usable file/i);
+  });
+
+  test('names the causes a user can act on', () => {
+    assert.match(humanizeError('ffmpeg is unavailable, so video and audio...'), /ffmpeg/i);
+    assert.match(humanizeError('ENOSPC: no space left on device'), /disk space/i);
+    assert.match(humanizeError('connect ECONNREFUSED 127.0.0.1:9'), /refused/i);
+    assert.match(humanizeError('HTTP 404'), /no longer there/i);
+    assert.match(humanizeError('HTTP 429'), /rate-limit/i);
+    assert.match(humanizeError('ERROR: Unsupported URL: https://x.test'), /not supported/i);
+  });
+
+  test('keeps an unknown message, trimmed to one line', () => {
+    const out = humanizeError('Something odd happened\nstack line\nstack line');
+    assert.equal(out, 'Something odd happened');
+  });
+
+  test('caps a very long unknown message', () => {
+    assert.ok(humanizeError('x'.repeat(400)).length <= 120);
   });
 });
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Category, DownloadRecord, ServerEvent, Settings } from '../shared/protocol.ts';
-import { CATEGORIES, DEFAULT_PORT } from '../shared/protocol.ts';
+import { CATEGORIES, DEFAULT_PORT, humanizeError } from '../shared/protocol.ts';
 import { SegmentStrip } from './SegmentStrip.tsx';
 import { AddDialog } from './AddDialog.tsx';
 import { FormatDialog } from './FormatDialog.tsx';
@@ -191,18 +191,20 @@ export function App(): React.ReactElement {
     0,
   );
   const completedCount = downloads.filter((d) => d.status === 'completed').length;
+  const failedCount = downloads.filter((d) => d.status === 'failed').length;
 
   const act = useCallback((path: string, id: string) => {
     void post(path, { id });
   }, []);
 
-  const clearCompleted = useCallback(() => {
-    // No optimistic removal: the server broadcasts download-removed, which
-    // keeps every client in step instead of just this one.
-    for (const d of downloads.filter((x) => x.status === 'completed')) {
-      void post('/downloads/cancel', { id: d.id });
-    }
-  }, [downloads]);
+  // No optimistic removal: the server broadcasts download-removed, which keeps
+  // every client in step instead of just this one.
+  const clearWhere = useCallback(
+    (match: (d: DownloadRecord) => boolean) => {
+      for (const d of downloads.filter(match)) void post('/downloads/cancel', { id: d.id });
+    },
+    [downloads],
+  );
 
   return (
     <div className="app">
@@ -279,7 +281,11 @@ export function App(): React.ReactElement {
           <div className="status">
             <span className={connected ? 'dot ok' : 'dot bad'} />
             <span className="status-text">{connected ? 'Connected' : 'Reconnecting…'}</span>
-            <span className="status-rate">{activeCount > 0 ? rate(totalRate) : 'Idle'}</span>
+            {/* A zero rate rendered as a bare dash reads as broken; before any
+                throughput is measured there is simply nothing to report. */}
+            <span className="status-rate">
+              {activeCount === 0 ? 'Idle' : totalRate > 0 ? rate(totalRate) : 'Starting…'}
+            </span>
           </div>
         </div>
       </aside>
@@ -292,7 +298,8 @@ export function App(): React.ReactElement {
               {visible.length === 0
                 ? 'Nothing here'
                 : `${visible.length} item${visible.length === 1 ? '' : 's'}`}
-              {activeCount > 0 && ` · ${activeCount} downloading at ${rate(totalRate)}`}
+              {activeCount > 0 &&
+                ` · ${activeCount} downloading${totalRate > 0 ? ` at ${rate(totalRate)}` : ''}`}
             </p>
           </div>
 
@@ -310,8 +317,20 @@ export function App(): React.ReactElement {
                 Pause all
               </button>
             )}
+            {failedCount > 0 && (
+              <button
+                className="btn-ghost"
+                onClick={() => clearWhere((d) => d.status === 'failed')}
+              >
+                <Icon.Alert size={14} />
+                Clear {failedCount} failed
+              </button>
+            )}
             {completedCount > 0 && (
-              <button className="btn-ghost" onClick={clearCompleted}>
+              <button
+                className="btn-ghost"
+                onClick={() => clearWhere((d) => d.status === 'completed')}
+              >
                 <Icon.Broom size={14} />
                 Clear completed
               </button>
@@ -442,22 +461,20 @@ function Row({
           <span className="name" title={d.filePath}>
             {d.filename}
           </span>
-          <span className="figures">
-            {done ? (
-              bytes(d.totalSize ?? d.downloaded)
-            ) : (
-              <>
-                <span className="fig-main">{bytes(d.downloaded)}</span>
-                <span className="fig-sep">/</span>
-                <span className="fig-total">{bytes(d.totalSize)}</span>
-              </>
-            )}
-          </span>
+          <span className="figures">{figuresFor(d)}</span>
         </div>
 
         <div className={indeterminate ? 'bar indeterminate' : 'bar'}>
           <div className="fill" style={indeterminate ? undefined : { width: `${pct}%` }} />
         </div>
+
+        {/* Its own line: an error squeezed between the status chip and the
+            buttons was truncated to uselessness. */}
+        {d.error && (
+          <p className="row-error" title={d.error}>
+            {humanizeError(d.error)}
+          </p>
+        )}
 
         {/* The per-connection view: what makes a segmented downloader legible,
             and the thing a single progress bar hides. */}
@@ -498,11 +515,6 @@ function Row({
                 <span>{relativeTime(d.completedAt)}</span>
               </>
             )}
-            {d.error && (
-              <span className="sub-error" title={d.error}>
-                {d.error}
-              </span>
-            )}
           </span>
 
           <div className="actions">
@@ -541,6 +553,30 @@ function Row({
         </div>
       </div>
     </article>
+  );
+}
+
+/**
+ * What the size column should say.
+ *
+ * A download that has not moved yet knows neither figure, and rendering that
+ * as "0 B / —" reads as broken rather than as pending. Say nothing until there
+ * is something to say.
+ */
+function figuresFor(d: DownloadRecord): React.ReactNode {
+  if (d.status === 'completed') return bytes(d.totalSize ?? d.downloaded);
+  if (d.status === 'failed' || d.status === 'cancelled') {
+    return d.downloaded > 0 ? `${bytes(d.downloaded)} of ${bytes(d.totalSize)}` : null;
+  }
+  if (d.downloaded === 0 && !d.totalSize) return null;
+  if (!d.totalSize) return <span className="fig-main">{bytes(d.downloaded)}</span>;
+
+  return (
+    <>
+      <span className="fig-main">{bytes(d.downloaded)}</span>
+      <span className="fig-sep">/</span>
+      <span className="fig-total">{bytes(d.totalSize)}</span>
+    </>
   );
 }
 

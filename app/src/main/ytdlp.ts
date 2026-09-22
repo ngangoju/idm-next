@@ -18,6 +18,12 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
+/**
+ * Marks the title line among yt-dlp's other stdout output. A control character
+ * so it cannot collide with a real title.
+ */
+const TITLE_MARKER = '\u0001idm-title\u0001';
+
 export interface YtFormat {
   id: string;
   ext: string;
@@ -217,8 +223,15 @@ export function buildQualities(formats: YtFormat[]): QualityChoice[] {
     const sizes = [video.filesize, needsAudio ? bestAudio!.filesize : null];
     const known = sizes.filter((n): n is number => typeof n === 'number');
 
+    // Carry a fallback: format ids are not stable, and a rendition listed a
+    // moment ago can be gone by the time the download starts — yt-dlp then
+    // fails outright with "Requested format is not available" rather than
+    // giving the user the quality they asked for.
+    const exact = needsAudio ? `${video.id}+${bestAudio!.id}` : video.id;
+    const byHeightSelector = `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`;
+
     choices.push({
-      formatId: needsAudio ? `${video.id}+${bestAudio!.id}` : video.id,
+      formatId: `${exact}/${byHeightSelector}`,
       label: `${height}p${height >= 720 ? ' HD' : ''}${video.fps && video.fps > 30 ? ` ${video.fps}` : ''}`,
       height,
       fps: video.fps,
@@ -288,6 +301,8 @@ export class YtDlp {
     filenameTemplate?: string;
     concurrentFragments?: number;
     onProgress?: (p: YtProgress) => void;
+    /** Fires as soon as yt-dlp knows the real title, before any bytes move. */
+    onTitle?: (title: string) => void;
     signal?: AbortSignal;
   }): Promise<{ filePath: string }> {
     const args = [
@@ -308,6 +323,11 @@ export class YtDlp {
       `${opts.destDir}/${opts.filenameTemplate ?? '%(title)s.%(ext)s'}`,
       '--print',
       'after_move:%(filepath)s',
+      // The real title, before the download starts. Without it a page URL
+      // shows as its last path segment — every YouTube download is called
+      // "watch" until it finishes.
+      '--print',
+      `before_dl:${TITLE_MARKER}%(title)s`,
     ];
     // --ffmpeg-location takes a PATH, not a command name. Given a bare
     // "ffmpeg" it warns that the location does not exist and then continues
@@ -349,12 +369,16 @@ export class YtDlp {
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) {
-          const progress = parseProgressLine(line);
+          const trimmed = line.trim();
+          const progress = parseProgressLine(trimmed);
           if (progress) {
             opts.onProgress?.(progress);
-          } else if (line.trim().startsWith('/')) {
+          } else if (trimmed.startsWith(TITLE_MARKER)) {
+            const title = trimmed.slice(TITLE_MARKER.length).trim();
+            if (title) opts.onTitle?.(title);
+          } else if (trimmed.startsWith('/')) {
             // after_move:%(filepath)s
-            finalPath = line.trim();
+            finalPath = trimmed;
           }
         }
       });
