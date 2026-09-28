@@ -1,0 +1,8 @@
+# LF everywhere, including Windows checkouts. Without this, Windows turns every
+# file into CRLF on checkout and the formatter flags all of them.
+* text=auto eol=lf
+
+# Windows-only scripts keep their native line endings.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf

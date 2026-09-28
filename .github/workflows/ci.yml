@@ -25,8 +25,12 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      # Each check runs even if an earlier one failed, so one run shows every
+      # problem rather than the first.
       - run: npm run lint
       - run: npm run typecheck
+        if: ${{ !cancelled() }}
       # Tests run under c8, so every run also reports coverage. Not a gate yet;
       # thresholds arrive with the refactor that makes them reachable.
       - run: npm run coverage
+        if: ${{ !cancelled() }}
