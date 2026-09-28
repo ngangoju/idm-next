@@ -33,7 +33,6 @@ const STATUS_RANK: Record<string, number> = {
   cancelled: 5,
 };
 
-
 export function App(): React.ReactElement {
   const [downloads, setDownloads] = useState<DownloadRecord[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -41,7 +40,9 @@ export function App(): React.ReactElement {
   const [connected, setConnected] = useState(false);
   const [adding, setAdding] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [ytdlp, setYtdlp] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
+  const [ytdlp, setYtdlp] = useState<{ ok: boolean; version?: string; error?: string } | null>(
+    null,
+  );
   const [picking, setPicking] = useState<string | null>(null);
 
   useEffect(() => {
@@ -142,10 +143,7 @@ export function App(): React.ReactElement {
   }, [downloads, filter]);
 
   const activeCount = downloads.filter((d) => d.status === 'downloading').length;
-  const totalRate = downloads.reduce(
-    (n, d) => n + (d.status === 'downloading' ? d.rateBps : 0),
-    0,
-  );
+  const totalRate = downloads.reduce((n, d) => n + (d.status === 'downloading' ? d.rateBps : 0), 0);
   const completedCount = downloads.filter((d) => d.status === 'completed').length;
   const failedCount = downloads.filter((d) => d.status === 'failed').length;
 
@@ -463,9 +461,7 @@ function Row({
                 {d.sourcePage && <span className="sub-dot">·</span>}
                 {/* A bare dash reads as broken in the first moments before any
                     throughput has been measured. */}
-                <span className="sub-rate">
-                  {d.rateBps > 0 ? rate(d.rateBps) : 'Starting…'}
-                </span>
+                <span className="sub-rate">{d.rateBps > 0 ? rate(d.rateBps) : 'Starting…'}</span>
                 {d.etaSeconds !== null && (
                   <>
                     <span className="sub-dot">·</span>
@@ -636,13 +632,7 @@ function IconButton({
   );
 }
 
-function EmptyState({
-  filter,
-  onAdd,
-}: {
-  filter: Filter;
-  onAdd: () => void;
-}): React.ReactElement {
+function EmptyState({ filter, onAdd }: { filter: Filter; onAdd: () => void }): React.ReactElement {
   const isRoot = filter === 'all';
   return (
     <div className="empty">
@@ -653,8 +643,8 @@ function EmptyState({
       {isRoot && (
         <>
           <p>
-            Paste a link, copy one to your clipboard, or install the browser extension to grab
-            video and audio straight from a page.
+            Paste a link, copy one to your clipboard, or install the browser extension to grab video
+            and audio straight from a page.
           </p>
           <button className="btn-primary" onClick={onAdd}>
             <Icon.Plus size={15} />

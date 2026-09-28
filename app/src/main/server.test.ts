@@ -69,7 +69,8 @@ async function rawRequest(headers: Record<string, string>, path = '/health'): Pr
     socket.on('data', (d) => (data += d.toString()));
     socket.on('end', () => {
       const status = /^HTTP\/1\.1 (\d{3})/.exec(data)?.[1];
-      status ? resolve(Number(status)) : reject(new Error(`no status in: ${data.slice(0, 80)}`));
+      if (status) resolve(Number(status));
+      else reject(new Error(`no status in: ${data.slice(0, 80)}`));
     });
     socket.on('error', reject);
   });

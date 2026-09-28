@@ -95,8 +95,8 @@ async function recordIfMedia(details) {
 
   const manifest = isManifest(details.url, contentType);
 
-  let pageUrl = '';
-  let pageTitle = '';
+  let pageUrl;
+  let pageTitle;
   try {
     const tab = await chrome.tabs.get(details.tabId);
     pageUrl = tab.url ?? '';
@@ -375,7 +375,8 @@ function notify(title, message) {
       type: 'basic',
       title,
       message,
-      iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      iconUrl:
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
     });
   } catch {
     /* no-op */

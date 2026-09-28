@@ -247,7 +247,10 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
    * Held in `external` while it runs, so it counts against the concurrency
    * budget and a pause or cancel in the meantime stops it like any transfer.
    */
-  private async verifyRoute(record: DownloadRecord, headers?: Record<string, string>): Promise<void> {
+  private async verifyRoute(
+    record: DownloadRecord,
+    headers?: Record<string, string>,
+  ): Promise<void> {
     const controller = new AbortController();
     this.external.set(record.id, controller);
     this.setStatus(record.id, 'probing');
@@ -291,7 +294,14 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
    * Download via yt-dlp. Used for pages and adaptive streams, where there is no
    * single ranged URL for our engine to work with.
    */
-  private async runExternal(record: DownloadRecord, headers?: Record<string, string>): Promise<void> {
+  private async runExternal(
+    record: DownloadRecord,
+    // The page's cookies and referer, from the extension. Not yet passed on,
+    // so yt-dlp runs logged out — why private and logged-in media fails.
+    // yt-dlp needs cookies as a Netscape file, not a header (a Cookie header
+    // would be replayed to every host a redirect reaches); see plan Phase 2.4.
+    _headers?: Record<string, string>,
+  ): Promise<void> {
     const controller = new AbortController();
     this.external.set(record.id, controller);
     this.setStatus(record.id, 'downloading');
@@ -628,7 +638,9 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
     }
 
     const drained = this.queues.find(
-      (q) => q.enabled && q.items.length > 0 &&
+      (q) =>
+        q.enabled &&
+        q.items.length > 0 &&
         q.items.every((id) => this.records.find((d) => d.id === id)?.status === 'completed'),
     );
     if (drained) this.emit('queue-drained', drained);
@@ -687,8 +699,8 @@ export function looksLikePage(url: string): boolean {
     const last = u.pathname.split('/').pop() ?? '';
     const ext = last.includes('.') ? last.split('.').pop()!.toLowerCase() : '';
 
-    if (ext === 'm3u8' || ext === 'mpd') return true;        // adaptive stream
-    if (ext === '' ) return true;                             // /watch, /video/123
+    if (ext === 'm3u8' || ext === 'mpd') return true; // adaptive stream
+    if (ext === '') return true; // /watch, /video/123
     if (['html', 'htm', 'php', 'aspx', 'jsp'].includes(ext)) return true;
     return false;
   } catch {
@@ -729,7 +741,9 @@ async function resolveProduced(staging: string): Promise<string | null> {
       }
       // yt-dlp's in-progress scratch files.
       if (/\.(part|ytdl|temp)$/i.test(entry.name)) continue;
-      const size = await stat(full).then((st) => st.size).catch(() => 0);
+      const size = await stat(full)
+        .then((st) => st.size)
+        .catch(() => 0);
       found.push({ path: full, size });
     }
   };

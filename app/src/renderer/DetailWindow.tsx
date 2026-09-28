@@ -59,6 +59,8 @@ export function DetailWindow({ id }: { id: string }): React.ReactElement {
   }, [id]);
 
   // Size the window to what it shows, so it is never a mostly-empty panel.
+  // The root is rendered in every state and the observer sees every change
+  // inside it, so this only has to be set up once.
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = root.current;
@@ -68,7 +70,7 @@ export function DetailWindow({ id }: { id: string }): React.ReactElement {
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [loaded, record === null]);
+  }, []);
 
   return (
     <div className="dw" ref={root}>
@@ -143,7 +145,11 @@ function Detail({ record: d }: { record: DownloadRecord }): React.ReactElement {
         <section className="dw-progress">
           <div className="dw-figures">
             <span className="dw-pct">
-              {indeterminate ? 'Downloading' : d.status === 'probing' ? 'Connecting' : `${Math.floor(pct)}%`}
+              {indeterminate
+                ? 'Downloading'
+                : d.status === 'probing'
+                  ? 'Connecting'
+                  : `${Math.floor(pct)}%`}
             </span>
             <span className="dw-rate">
               {d.status === 'paused' ? 'Paused' : d.rateBps > 0 ? rate(d.rateBps) : 'Starting…'}

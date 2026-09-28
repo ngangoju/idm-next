@@ -345,17 +345,25 @@ describe('two downloads with the same name at once', () => {
     const fb = await startFixture(slow(b));
     const dest = await tempDir();
     try {
-      const da = new Download({ url: fa.url.replace('file.bin', 'video.mp4'), destDir: dest, connections: 4 });
-      const db = new Download({ url: fb.url.replace('file.bin', 'video.mp4'), destDir: dest, connections: 4 });
+      const da = new Download({
+        url: fa.url.replace('file.bin', 'video.mp4'),
+        destDir: dest,
+        connections: 4,
+      });
+      const db = new Download({
+        url: fb.url.replace('file.bin', 'video.mp4'),
+        destDir: dest,
+        connections: 4,
+      });
       const done = Promise.all([once(da, 'done'), once(db, 'done')]);
       await Promise.all([da.start(), db.start()]);
       await done;
 
       assert.notEqual(da.path, db.path);
-      assert.deepEqual(
-        [basename(da.path), basename(db.path)].sort(),
-        ['video (1).mp4', 'video.mp4'],
-      );
+      assert.deepEqual([basename(da.path), basename(db.path)].sort(), [
+        'video (1).mp4',
+        'video.mp4',
+      ]);
       assert.equal(sha256(await readFile(da.path)), sha256(a));
       assert.equal(sha256(await readFile(db.path)), sha256(b));
     } finally {

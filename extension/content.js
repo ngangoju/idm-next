@@ -37,12 +37,15 @@
   let savedUserOffset = { x: 0, y: 0 };
 
   try {
-    chrome.storage?.local?.get('panelPos').then((data) => {
-      if (data?.panelPos && typeof data.panelPos.x === 'number') {
-        savedUserOffset = data.panelPos;
-        for (const p of panels) p.place();
-      }
-    }).catch(() => {});
+    chrome.storage?.local
+      ?.get('panelPos')
+      .then((data) => {
+        if (data?.panelPos && typeof data.panelPos.x === 'number') {
+          savedUserOffset = data.panelPos;
+          for (const p of panels) p.place();
+        }
+      })
+      .catch(() => {});
   } catch {
     /* standalone harness */
   }
@@ -61,15 +64,37 @@
    * over, which is exactly the case the panel exists to disambiguate.
    */
   const ITAG = {
-    17: '144p', 160: '144p', 278: '144p',
-    133: '240p', 242: '240p', 5: '240p',
-    134: '360p', 243: '360p', 18: '360p', 396: '360p',
-    135: '480p', 244: '480p', 397: '480p',
-    136: '720p', 247: '720p', 22: '720p', 298: '720p60', 398: '720p',
-    137: '1080p', 248: '1080p', 299: '1080p60', 399: '1080p',
-    271: '1440p', 308: '1440p60',
-    313: '2160p', 315: '2160p60', 401: '2160p',
-    140: 'audio 128k', 139: 'audio 48k', 251: 'audio opus', 250: 'audio opus',
+    17: '144p',
+    160: '144p',
+    278: '144p',
+    133: '240p',
+    242: '240p',
+    5: '240p',
+    134: '360p',
+    243: '360p',
+    18: '360p',
+    396: '360p',
+    135: '480p',
+    244: '480p',
+    397: '480p',
+    136: '720p',
+    247: '720p',
+    22: '720p',
+    298: '720p60',
+    398: '720p',
+    137: '1080p',
+    248: '1080p',
+    299: '1080p60',
+    399: '1080p',
+    271: '1440p',
+    308: '1440p60',
+    313: '2160p',
+    315: '2160p60',
+    401: '2160p',
+    140: 'audio 128k',
+    139: 'audio 48k',
+    251: 'audio opus',
+    250: 'audio opus',
   };
 
   function itagQuality(url) {
@@ -165,8 +190,20 @@
 
   /** Titles that identify a site rather than anything on it. */
   const SITE_NAMES = new Set([
-    'instagram', 'youtube', 'facebook', 'vimeo', 'tiktok', 'twitter', 'x',
-    'reddit', 'twitch', 'dailymotion', 'video', 'watch', 'home', 'feed',
+    'instagram',
+    'youtube',
+    'facebook',
+    'vimeo',
+    'tiktok',
+    'twitter',
+    'x',
+    'reddit',
+    'twitch',
+    'dailymotion',
+    'video',
+    'watch',
+    'home',
+    'feed',
   ]);
 
   /** Mirrors the worker's rule; the panel gets titles already resolved. */
@@ -376,7 +413,9 @@
       startOffsetY = userOffsetY;
       try {
         bar.setPointerCapture(e.pointerId);
-      } catch {}
+      } catch {
+        // Pointer already gone (a quick tap); dragging still works without capture.
+      }
     });
 
     bar.addEventListener('pointermove', (e) => {
@@ -400,12 +439,16 @@
       bar.classList.remove('dragging');
       try {
         bar.releasePointerCapture(e.pointerId);
-      } catch {}
+      } catch {
+        // Capture was never taken or is already released.
+      }
       if (hasMoved) {
         savedUserOffset = { x: userOffsetX, y: userOffsetY };
         try {
           chrome.storage?.local?.set({ panelPos: savedUserOffset });
-        } catch {}
+        } catch {
+          // Extension reloaded under the page; the position just isn't remembered.
+        }
       }
     };
 
@@ -741,13 +784,14 @@
     }
     pagePanel ??= createPanel({
       anchor: null,
-      labelFor: (list) => (list.length > 1 ? `Download ${list.length} files` : 'Download this file'),
+      labelFor: (list) =>
+        list.length > 1 ? `Download ${list.length} files` : 'Download this file',
     });
   }
 
   async function refresh() {
-    let items = [];
-    let context = { rejects: [], sabr: false };
+    let items;
+    let context;
     try {
       const res = await chrome.runtime.sendMessage({ type: 'list' });
       items = res?.items ?? [];

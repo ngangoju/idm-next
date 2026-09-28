@@ -6,7 +6,19 @@
  * window-all-closed. Quitting from the tray is what actually stops transfers,
  * which is also how IDM behaves.
  */
-import { app, BrowserWindow, Tray, Menu, nativeImage, nativeTheme, clipboard, Notification, shell, dialog, ipcMain } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  clipboard,
+  Notification,
+  shell,
+  dialog,
+  ipcMain,
+} from 'electron';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { Store } from './store.ts';

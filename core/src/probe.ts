@@ -16,9 +16,7 @@ export function makeDispatcher(opts: { proxy?: string; connections?: number }): 
     keepAliveMaxTimeout: 120_000,
     connections: Math.max(1, opts.connections ?? 8),
   };
-  const base = opts.proxy
-    ? new ProxyAgent({ uri: opts.proxy, ...shared })
-    : new Agent(shared);
+  const base = opts.proxy ? new ProxyAgent({ uri: opts.proxy, ...shared }) : new Agent(shared);
   // undici 8 moved redirect handling out of request() and into the dispatcher.
   return base.compose(interceptors.redirect({ maxRedirections: 10 }));
 }
@@ -138,9 +136,7 @@ export function validateResume(
   fresh: ProbeResult,
 ): { ok: true } | { ok: false; reason: string } {
   if (journal.etag && fresh.etag) {
-    return journal.etag === fresh.etag
-      ? { ok: true }
-      : { ok: false, reason: 'ETag changed' };
+    return journal.etag === fresh.etag ? { ok: true } : { ok: false, reason: 'ETag changed' };
   }
   if (journal.lastModified && fresh.lastModified) {
     return journal.lastModified === fresh.lastModified

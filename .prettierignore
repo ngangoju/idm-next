@@ -1,0 +1,14 @@
+node_modules
+# Other tools' worktrees live inside the project; never touch them.
+.kilo
+.claude
+dist
+release
+package-lock.json
+extension/manifest.json
+# Hand-formatted on purpose: the stylesheet groups short declarations on one
+# line, and prose is wrapped by meaning, not by column.
+*.css
+*.md
+*.html
+coverage

@@ -9,7 +9,14 @@ import type { DownloadStatus, SegmentState } from '@idm-next/core';
 export const DEFAULT_PORT = 47591;
 
 /** File categories, in the order they appear in the sidebar. */
-export const CATEGORIES = ['video', 'audio', 'documents', 'compressed', 'programs', 'other'] as const;
+export const CATEGORIES = [
+  'video',
+  'audio',
+  'documents',
+  'compressed',
+  'programs',
+  'other',
+] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 export const CATEGORY_EXTENSIONS: Record<Exclude<Category, 'other'>, readonly string[]> = {
@@ -162,9 +169,23 @@ export type ServerEvent =
    * page download is named for its host until yt-dlp reports the real title,
    * and without them that title reached the store but never the screen.
    */
-  | { type: 'progress'; downloads: Pick<DownloadRecord,
-      'id' | 'status' | 'downloaded' | 'totalSize' | 'rateBps' | 'etaSeconds' | 'segments'
-      | 'filename' | 'category' | 'filePath' | 'error'>[] }
+  | {
+      type: 'progress';
+      downloads: Pick<
+        DownloadRecord,
+        | 'id'
+        | 'status'
+        | 'downloaded'
+        | 'totalSize'
+        | 'rateBps'
+        | 'etaSeconds'
+        | 'segments'
+        | 'filename'
+        | 'category'
+        | 'filePath'
+        | 'error'
+      >[];
+    }
   | { type: 'download-added'; download: DownloadRecord }
   | { type: 'download-restarted'; download: DownloadRecord }
   | { type: 'download-done'; download: DownloadRecord }

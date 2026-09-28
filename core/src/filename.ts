@@ -9,7 +9,10 @@ import { access } from 'node:fs/promises';
 
 /** Windows forbids these basenames regardless of extension. */
 const RESERVED = new Set([
-  'CON', 'PRN', 'AUX', 'NUL',
+  'CON',
+  'PRN',
+  'AUX',
+  'NUL',
   ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
   ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
 ]);
@@ -18,6 +21,7 @@ const RESERVED = new Set([
 const MAX_NAME_BYTES = 255;
 
 /** Control characters plus the set Windows rejects in a filename. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const ILLEGAL = new RegExp('[\\u0000-\\u001f\\u007f<>:"|?*]', 'g');
 
 /**

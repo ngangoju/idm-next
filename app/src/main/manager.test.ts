@@ -92,7 +92,7 @@ describe('naming a page download', () => {
 describe('humanizeError', () => {
   test('replaces the raw ENOENT the user was shown', () => {
     const raw =
-      "ENOENT: no such file or directory, rename " +
+      'ENOENT: no such file or directory, rename ' +
       "'/Users/x/Downloads/IDM-Next/other/.idm-staging-0a777b76/Some Video.webm' -> " +
       "'/Users/x/Downloads/IDM-Next/other/Some Video.webm'";
     const out = humanizeError(raw);
@@ -237,15 +237,16 @@ describe('repeat downloads of the same stream', () => {
     }
 
     assert.equal(new Set(paths).size, 3, 'each run must get its own path');
-    assert.deepEqual(
-      (await readdir(dest)).sort(),
-      ['stream (1).mp4', 'stream (2).mp4', 'stream.mp4'],
-    );
+    assert.deepEqual((await readdir(dest)).sort(), [
+      'stream (1).mp4',
+      'stream (2).mp4',
+      'stream.mp4',
+    ]);
     await manager.shutdown();
   });
 });
 
-describe('picking yt-dlp\'s output', () => {
+describe("picking yt-dlp's output", () => {
   test('tells an intermediate stream from a merged result', () => {
     // yt-dlp writes NAME.f<id>.ext per stream and NAME.ext for the merge.
     // Confusing the two kept the audio track and deleted the finished video,
@@ -335,10 +336,7 @@ describe('persistence', () => {
     const m2 = new DownloadManager(store2);
     await m2.init();
     assert.equal(m2.records.length, 2);
-    assert.deepEqual(
-      m2.records.map((d) => basename(d.filename)).sort(),
-      ['a.mp4', 'b.pdf'],
-    );
+    assert.deepEqual(m2.records.map((d) => basename(d.filename)).sort(), ['a.mp4', 'b.pdf']);
     await m2.shutdown();
   });
 

@@ -1,0 +1,32 @@
+# Every push and pull request is checked on both platforms the app ships on.
+# Windows matters most: it is where most download-manager users are, and it is
+# the platform nobody on this project develops on.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    env:
+      # The unit tests never launch Electron; skip its ~100 MB download.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      # Tests run under c8, so every run also reports coverage. Not a gate yet;
+      # thresholds arrive with the refactor that makes them reachable.
+      - run: npm run coverage

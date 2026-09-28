@@ -47,9 +47,7 @@ function panelKeys() {
 describe('the panel object', () => {
   test('defines every method the script calls on it', () => {
     const keys = panelKeys();
-    const called = new Set(
-      [...SRC.matchAll(/\bpanel\.([a-zA-Z_$][\w$]*)\s*\(/g)].map((m) => m[1]),
-    );
+    const called = new Set([...SRC.matchAll(/\bpanel\.([a-zA-Z_$][\w$]*)\s*\(/g)].map((m) => m[1]));
 
     for (const name of called) {
       assert.ok(

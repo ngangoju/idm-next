@@ -13,7 +13,11 @@ dotEl.classList.toggle('ok', running);
 statusEl.textContent = running ? 'app connected' : 'app not running';
 warnEl.hidden = running;
 
-const { items, rejects = [], sabr = false } = await chrome.runtime.sendMessage({
+const {
+  items,
+  rejects = [],
+  sabr = false,
+} = await chrome.runtime.sendMessage({
   type: 'list',
   tabId: tab?.id,
 });
@@ -43,9 +47,9 @@ function row(item) {
   title.title = item.url;
   const sub = document.createElement('div');
   sub.className = 'sub';
-  sub.textContent = [item.contentType, item.size ? formatBytes(item.size) : null]
-    .filter(Boolean)
-    .join(' · ') || (item.isManifest ? 'adaptive stream' : 'unknown size');
+  sub.textContent =
+    [item.contentType, item.size ? formatBytes(item.size) : null].filter(Boolean).join(' · ') ||
+    (item.isManifest ? 'adaptive stream' : 'unknown size');
   meta.append(title, sub);
 
   const btn = document.createElement('button');
@@ -98,7 +102,6 @@ function formatBytes(n) {
   return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
-
 /**
  * Explain an empty list instead of leaving the user to guess.
  *
@@ -133,9 +136,11 @@ function renderDiagnosis() {
           return r.url.slice(0, 40);
         }
       })();
-      return `<li><span class="rj-host">${name}</span>` +
-             `<span class="rj-ct">${r.contentType ?? 'unknown type'}</span>` +
-             `<span class="rj-why">${r.reason}</span></li>`;
+      return (
+        `<li><span class="rj-host">${name}</span>` +
+        `<span class="rj-ct">${r.contentType ?? 'unknown type'}</span>` +
+        `<span class="rj-why">${r.reason}</span></li>`
+      );
     })
     .join('');
 

@@ -8,3 +8,4 @@ out/
 .vite/
 dist/
 release/
+coverage/

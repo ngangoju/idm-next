@@ -197,8 +197,7 @@ export function parseExtraction(json: string): Extraction {
  */
 export function buildQualities(formats: YtFormat[]): QualityChoice[] {
   const audioOnly = formats.filter((f) => !f.vcodec && f.acodec);
-  const bestAudio =
-    [...audioOnly].sort((a, b) => (b.tbr ?? 0) - (a.tbr ?? 0))[0] ?? null;
+  const bestAudio = [...audioOnly].sort((a, b) => (b.tbr ?? 0) - (a.tbr ?? 0))[0] ?? null;
 
   const score = (f: YtFormat): number => f.filesize ?? f.tbr ?? 0;
 

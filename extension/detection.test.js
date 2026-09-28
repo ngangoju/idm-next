@@ -141,7 +141,11 @@ describe('shouldRecord: what we ignore', () => {
 
   test('a content type with parameters is still matched', () => {
     assert.equal(
-      shouldRecord({ url: 'https://x.test/a.mp4', contentType: 'video/mp4; codecs="avc1"', size: BIG }),
+      shouldRecord({
+        url: 'https://x.test/a.mp4',
+        contentType: 'video/mp4; codecs="avc1"',
+        size: BIG,
+      }),
       true,
     );
   });
@@ -159,10 +163,7 @@ describe('dedupeKey', () => {
   });
 
   test('keeps genuinely different files apart', () => {
-    assert.notEqual(
-      dedupeKey('https://x.test/720p.mp4'),
-      dedupeKey('https://x.test/1080p.mp4'),
-    );
+    assert.notEqual(dedupeKey('https://x.test/720p.mp4'), dedupeKey('https://x.test/1080p.mp4'));
   });
 
   test('keeps meaningful query parameters', () => {
@@ -227,8 +228,10 @@ describe('url parsing', () => {
  * Content-Length describes one range, not the file.
  */
 describe('YouTube watch page', () => {
-  const VIDEO = 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=137&mime=video%2Fmp4&range=0-65535&rn=12&cpn=abc';
-  const AUDIO = 'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=140&mime=audio%2Fmp4&range=0-65535&rn=13&cpn=abc';
+  const VIDEO =
+    'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=137&mime=video%2Fmp4&range=0-65535&rn=12&cpn=abc';
+  const AUDIO =
+    'https://rr6---sn-ug5o.googlevideo.com/videoplayback?expire=1738378606&itag=140&mime=audio%2Fmp4&range=0-65535&rn=13&cpn=abc';
   const TIMEDTEXT = 'https://www.youtube.com/api/timedtext?v=pNrhAv1QC1Q&fmt=json3';
   const PLAYER_API = 'https://www.youtube.com/youtubei/v1/player?key=AIza';
 
@@ -332,8 +335,14 @@ describe('parseContentRangeTotal', () => {
 
 describe('parseClen and isRangedUrl', () => {
   test('reads total bytes from clen query parameter', () => {
-    assert.equal(parseClen('https://rr.googlevideo.com/videoplayback?clen=189000000&itag=137'), 189000000);
-    assert.equal(parseClen('https://rr.googlevideo.com/videoplayback?clen=3800000&itag=140'), 3800000);
+    assert.equal(
+      parseClen('https://rr.googlevideo.com/videoplayback?clen=189000000&itag=137'),
+      189000000,
+    );
+    assert.equal(
+      parseClen('https://rr.googlevideo.com/videoplayback?clen=3800000&itag=140'),
+      3800000,
+    );
   });
 
   test('returns null when clen is missing or malformed', () => {
@@ -414,7 +423,6 @@ describe('attachments still work for real downloads', () => {
   });
 });
 
-
 describe('classify: explaining a rejection', () => {
   test('names SABR/UMP, which is why YouTube can look empty', () => {
     // Video and audio multiplexed into one POSTed stream: nothing to fetch by
@@ -456,7 +464,10 @@ describe('looksMediaAdjacent: what is worth reporting', () => {
   test('media types and media hosts are', () => {
     assert.equal(looksMediaAdjacent('https://x.test/a', 'video/mp4'), true);
     assert.equal(looksMediaAdjacent('https://x.test/a', 'audio/mp4'), true);
-    assert.equal(looksMediaAdjacent('https://rr6---sn-x.googlevideo.com/videoplayback', null), true);
+    assert.equal(
+      looksMediaAdjacent('https://rr6---sn-x.googlevideo.com/videoplayback', null),
+      true,
+    );
     assert.equal(looksMediaAdjacent('https://x.test/clip.mkv', null), true);
   });
 
@@ -474,7 +485,6 @@ describe('isUnfetchableStream', () => {
     assert.equal(isUnfetchableStream(null), false);
   });
 });
-
 
 /**
  * Instagram serves every clip from a CDN path whose name is a signed opaque
@@ -533,7 +543,8 @@ describe('Instagram reel page', () => {
 
 describe('X (Twitter)', () => {
   // From a real download: the page's title, used as the file's name.
-  const TITLE = 'PRINCIPAL 🇺🇬 on X: "You have to be creative to survive 🤣🤣🤣🙌 https://t.co/cngbc6BG3x" / X';
+  const TITLE =
+    'PRINCIPAL 🇺🇬 on X: "You have to be creative to survive 🤣🤣🤣🙌 https://t.co/cngbc6BG3x" / X';
   const FRAGMENT =
     'https://video.twimg.com/amplify_video/2102308025285443584/vid/avc1/57000/61400/720x1280/NdMhp7af9qaNmY8L.m4s';
 

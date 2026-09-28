@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
-    "test": "node --test 'test/*.test.ts'",
+    "test": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "bench": "node bench/throughput.mjs"
   },

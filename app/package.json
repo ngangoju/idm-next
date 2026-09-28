@@ -4,7 +4,7 @@
   "type": "module",
   "main": "dist/main/index.cjs",
   "scripts": {
-    "test": "node --test --test-timeout=60000 'src/main/*.test.ts'",
+    "test": "node --test --test-timeout=60000 \"src/main/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "build:main": "node scripts/build-main.mjs",
     "build:renderer": "vite build",

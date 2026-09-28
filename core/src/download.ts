@@ -276,9 +276,7 @@ export class Download extends EventEmitter<DownloadEvents> {
       await res.body.dump();
       if (isRetryableStatus(res.statusCode)) {
         const err = new Error(`HTTP ${res.statusCode}`) as Error & { retryAfterMs?: number };
-        const ra = parseRetryAfter(
-          (res.headers['retry-after'] as string | undefined) ?? undefined,
-        );
+        const ra = parseRetryAfter((res.headers['retry-after'] as string | undefined) ?? undefined);
         if (ra !== null) err.retryAfterMs = ra;
 
         if (res.statusCode === 429 || res.statusCode === 503) {

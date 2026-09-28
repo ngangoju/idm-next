@@ -53,12 +53,7 @@ export interface DownloadOptions {
 }
 
 export type DownloadStatus =
-  | 'probing'
-  | 'downloading'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'probing' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 export interface ProgressSnapshot {
   status: DownloadStatus;

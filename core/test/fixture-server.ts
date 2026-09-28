@@ -52,9 +52,11 @@ export function makeBody(size: number, seed = 1): Buffer {
   let x = seed >>> 0;
   for (let i = 0; i < size; i++) {
     // xorshift32
-    x ^= x << 13; x >>>= 0;
+    x ^= x << 13;
+    x >>>= 0;
     x ^= x >>> 17;
-    x ^= x << 5; x >>>= 0;
+    x ^= x << 5;
+    x >>>= 0;
     buf[i] = x & 0xff;
   }
   return buf;
@@ -154,8 +156,7 @@ async function writeBody(
   absoluteStart: number,
 ): Promise<void> {
   const slow = options.slowRange;
-  const isSlow =
-    slow !== undefined && absoluteStart >= slow.from && absoluteStart <= slow.to;
+  const isSlow = slow !== undefined && absoluteStart >= slow.from && absoluteStart <= slow.to;
 
   // Small chunks when throttling so the engine sees a genuinely slow trickle
   // rather than one big stall.

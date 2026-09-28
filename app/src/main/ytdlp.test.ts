@@ -49,7 +49,13 @@ describe('parseProgressLine', () => {
     const p = parseProgressLine(
       '{"status":"downloading","downloaded_bytes":0,"total_bytes":null,"speed":null,"eta":null}',
     );
-    assert.deepEqual(p, { status: 'downloading', downloaded: 0, total: null, speed: null, eta: null });
+    assert.deepEqual(p, {
+      status: 'downloading',
+      downloaded: 0,
+      total: null,
+      speed: null,
+      eta: null,
+    });
   });
 
   test('ignores yt-dlp chatter that is not progress JSON', () => {
@@ -82,10 +88,48 @@ describe('parseExtraction', () => {
     duration: 3600,
     thumbnail: 'https://x.test/t.jpg',
     formats: [
-      { format_id: '18', ext: 'mp4', width: 640, height: 360, protocol: 'https', url: 'https://x.test/360.mp4', vcodec: 'avc1', acodec: 'mp4a', filesize: 1000 },
-      { format_id: '137', ext: 'mp4', width: 1920, height: 1080, protocol: 'https', url: 'https://x.test/1080.mp4', vcodec: 'avc1', acodec: 'none', filesize_approx: 5000, fps: 30 },
-      { format_id: 'hls-720', ext: 'mp4', height: 720, protocol: 'm3u8_native', url: 'https://x.test/m.m3u8', vcodec: 'avc1', acodec: 'mp4a' },
-      { format_id: '251', ext: 'webm', protocol: 'https', url: 'https://x.test/audio.webm', vcodec: 'none', acodec: 'opus', tbr: 128, filesize: 800 },
+      {
+        format_id: '18',
+        ext: 'mp4',
+        width: 640,
+        height: 360,
+        protocol: 'https',
+        url: 'https://x.test/360.mp4',
+        vcodec: 'avc1',
+        acodec: 'mp4a',
+        filesize: 1000,
+      },
+      {
+        format_id: '137',
+        ext: 'mp4',
+        width: 1920,
+        height: 1080,
+        protocol: 'https',
+        url: 'https://x.test/1080.mp4',
+        vcodec: 'avc1',
+        acodec: 'none',
+        filesize_approx: 5000,
+        fps: 30,
+      },
+      {
+        format_id: 'hls-720',
+        ext: 'mp4',
+        height: 720,
+        protocol: 'm3u8_native',
+        url: 'https://x.test/m.m3u8',
+        vcodec: 'avc1',
+        acodec: 'mp4a',
+      },
+      {
+        format_id: '251',
+        ext: 'webm',
+        protocol: 'https',
+        url: 'https://x.test/audio.webm',
+        vcodec: 'none',
+        acodec: 'opus',
+        tbr: 128,
+        filesize: 800,
+      },
     ],
   });
 
@@ -105,7 +149,9 @@ describe('parseExtraction', () => {
     // A bare HLS media playlist carries no dimensions. Calling that "audio
     // only" mislabelled a 720p video in the picker.
     const e = parseExtraction(
-      JSON.stringify({ formats: [{ format_id: 'x', protocol: 'm3u8_native', url: 'https://x/a.m3u8' }] }),
+      JSON.stringify({
+        formats: [{ format_id: 'x', protocol: 'm3u8_native', url: 'https://x/a.m3u8' }],
+      }),
     );
     assert.equal(e.formats[0]?.resolution, null);
   });
@@ -139,7 +185,9 @@ describe('parseExtraction', () => {
   test('unwraps a playlist to its first entry', () => {
     const playlist = JSON.stringify({
       _type: 'playlist',
-      entries: [{ title: 'First', formats: [{ format_id: 'a', protocol: 'https', url: 'https://x/1' }] }],
+      entries: [
+        { title: 'First', formats: [{ format_id: 'a', protocol: 'https', url: 'https://x/1' }] },
+      ],
     });
     const e = parseExtraction(playlist);
     assert.equal(e.isPlaylist, true);
@@ -229,7 +277,13 @@ describe('the installed yt-dlp', { skip: hasYtDlp ? false : 'yt-dlp not installe
     child.stdout.on('data', (c: string) => (help += c));
     await once(child, 'close');
 
-    for (const flag of ['--progress-template', '--progress-delta', '--concurrent-fragments', '-J', '--print']) {
+    for (const flag of [
+      '--progress-template',
+      '--progress-delta',
+      '--concurrent-fragments',
+      '-J',
+      '--print',
+    ]) {
       assert.ok(help.includes(flag), `yt-dlp no longer documents ${flag}`);
     }
   });
@@ -263,8 +317,22 @@ describe('remuxIfMislabelled', { skip: hasFfmpeg ? false : 'ffmpeg not installed
     const file = join(dir, name);
     const child = spawn(
       'ffmpeg',
-      ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10:duration=1',
-       '-c:v', 'libx264', '-preset', 'ultrafast', '-f', 'mpegts', file],
+      [
+        '-v',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc=size=160x120:rate=10:duration=1',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'ultrafast',
+        '-f',
+        'mpegts',
+        file,
+      ],
       { stdio: 'ignore' },
     );
     await once(child, 'close');
@@ -306,8 +374,20 @@ describe('remuxIfMislabelled', { skip: hasFfmpeg ? false : 'ffmpeg not installed
       const file = join(dir, 'real.mp4');
       const child = spawn(
         'ffmpeg',
-        ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10:duration=1',
-         '-c:v', 'libx264', '-preset', 'ultrafast', file],
+        [
+          '-v',
+          'error',
+          '-y',
+          '-f',
+          'lavfi',
+          '-i',
+          'testsrc=size=160x120:rate=10:duration=1',
+          '-c:v',
+          'libx264',
+          '-preset',
+          'ultrafast',
+          file,
+        ],
         { stdio: 'ignore' },
       );
       await once(child, 'close');

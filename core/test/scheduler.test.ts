@@ -132,10 +132,7 @@ describe('steal: termination', () => {
 
 describe('progress accounting', () => {
   test('downloaded sums cursor movement across segments', () => {
-    const sched = new SegmentScheduler([
-      seg(0, 9, 5, 0),
-      seg(10, 19, 20, 0),
-    ]);
+    const sched = new SegmentScheduler([seg(0, 9, 5, 0), seg(10, 19, 20, 0)]);
     assert.equal(sched.downloaded, 5 + 10);
   });
 

@@ -17,13 +17,45 @@ export const MEDIA_TYPES = [
 ];
 
 export const MEDIA_EXTENSIONS = [
-  'mp4', 'mkv', 'webm', 'mov', 'avi', 'flv', 'm4v', 'ts', 'mpg', 'mpeg', 'wmv',
-  'mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'opus', 'wma',
+  'mp4',
+  'mkv',
+  'webm',
+  'mov',
+  'avi',
+  'flv',
+  'm4v',
+  'ts',
+  'mpg',
+  'mpeg',
+  'wmv',
+  'mp3',
+  'm4a',
+  'aac',
+  'flac',
+  'wav',
+  'ogg',
+  'opus',
+  'wma',
 ];
 
 export const ARCHIVE_EXTENSIONS = [
-  'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'iso', 'dmg', 'pkg', 'exe',
-  'msi', 'deb', 'rpm', 'apk', 'pdf', 'epub',
+  'zip',
+  'rar',
+  '7z',
+  'tar',
+  'gz',
+  'bz2',
+  'xz',
+  'iso',
+  'dmg',
+  'pkg',
+  'exe',
+  'msi',
+  'deb',
+  'rpm',
+  'apk',
+  'pdf',
+  'epub',
 ];
 
 /**
@@ -49,8 +81,20 @@ const IDENTITY_PARAMS = ['itag', 'quality', 'res', 'resolution', 'format', 'fmt'
  * file a row is. Instagram's reel pages often report exactly this.
  */
 const SITE_NAMES = new Set([
-  'instagram', 'youtube', 'facebook', 'vimeo', 'tiktok', 'twitter', 'x',
-  'reddit', 'twitch', 'dailymotion', 'video', 'watch', 'home', 'feed',
+  'instagram',
+  'youtube',
+  'facebook',
+  'vimeo',
+  'tiktok',
+  'twitter',
+  'x',
+  'reddit',
+  'twitch',
+  'dailymotion',
+  'video',
+  'watch',
+  'home',
+  'feed',
 ]);
 
 export function isSiteName(title) {
@@ -59,8 +103,21 @@ export function isSiteName(title) {
 
 /** Endpoint names shared by every file on a site, so they identify nothing. */
 const GENERIC_NAMES = new Set([
-  'videoplayback', 'watch', 'download', 'index', 'master', 'playlist',
-  'video', 'audio', 'media', 'file', 'stream', 'play', 'get', 'v', 'dl',
+  'videoplayback',
+  'watch',
+  'download',
+  'index',
+  'master',
+  'playlist',
+  'video',
+  'audio',
+  'media',
+  'file',
+  'stream',
+  'play',
+  'get',
+  'v',
+  'dl',
 ]);
 
 /**
@@ -71,15 +128,29 @@ const GENERIC_NAMES = new Set([
  * check and fill the panel with 1 KB JSON files.
  */
 const NOISE_PATHS = [
-  '/api/timedtext', '/timedtext',
-  '/youtubei/', '/api/stats', '/ptracking', '/generate_204', '/log_event',
-  '/gen_204', '/csi_204', '/qoe', '/atr', '/pagead/', '/doubleclick',
+  '/api/timedtext',
+  '/timedtext',
+  '/youtubei/',
+  '/api/stats',
+  '/ptracking',
+  '/generate_204',
+  '/log_event',
+  '/gen_204',
+  '/csi_204',
+  '/qoe',
+  '/atr',
+  '/pagead/',
+  '/doubleclick',
 ];
 
 /** Content types that are never, on their own, something a user wants. */
 const NEVER_TYPES = [
-  'application/json', 'application/xml', 'text/', 'application/javascript',
-  'application/x-javascript', 'application/x-www-form-urlencoded',
+  'application/json',
+  'application/xml',
+  'text/',
+  'application/javascript',
+  'application/x-javascript',
+  'application/x-www-form-urlencoded',
 ];
 
 /** Extensions that mean "this is part of a web page", not "this is a file". */
@@ -209,7 +280,6 @@ export function looksOpaqueName(name) {
   const hasDigit = /\d/.test(longest);
   return (hasUpper && hasLower && hasDigit) || /^[0-9a-f]{20,}$/i.test(longest);
 }
-
 
 export function extensionOf(rawUrl) {
   try {

@@ -22,11 +22,7 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { timingSafeEqual } from 'node:crypto';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { DownloadManager } from './manager.ts';
-import {
-  DEFAULT_PORT,
-  type AddDownloadRequest,
-  type ServerEvent,
-} from '../shared/protocol.ts';
+import { DEFAULT_PORT, type AddDownloadRequest, type ServerEvent } from '../shared/protocol.ts';
 
 export interface ServerOptions {
   manager: DownloadManager;
@@ -221,7 +217,10 @@ export class ControlServer {
 
       switch (path) {
         case '/probe': {
-          const { url: target, headers } = body as { url?: string; headers?: Record<string, string> };
+          const { url: target, headers } = body as {
+            url?: string;
+            headers?: Record<string, string>;
+          };
           if (!isHttpUrl(target)) return json(res, 400, { error: 'bad url' });
           return json(res, 200, await this.manager.probeUrl(target, headers));
         }

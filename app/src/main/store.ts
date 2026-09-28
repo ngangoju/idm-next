@@ -27,9 +27,29 @@ export function defaultSettings(): Settings {
     maxConcurrentDownloads: 4,
     clipboardMonitor: true,
     watchedExtensions: [
-      'zip', 'rar', '7z', 'tar', 'gz', 'iso', 'dmg', 'exe', 'msi', 'pkg', 'deb',
-      'mp4', 'mkv', 'webm', 'mov', 'avi', 'mp3', 'flac', 'm4a', 'wav',
-      'pdf', 'epub', 'apk',
+      'zip',
+      'rar',
+      '7z',
+      'tar',
+      'gz',
+      'iso',
+      'dmg',
+      'exe',
+      'msi',
+      'pkg',
+      'deb',
+      'mp4',
+      'mkv',
+      'webm',
+      'mov',
+      'avi',
+      'mp3',
+      'flac',
+      'm4a',
+      'wav',
+      'pdf',
+      'epub',
+      'apk',
     ],
     browserTakeover: true,
     postDownloadCommand: null,
@@ -129,9 +149,8 @@ function migrate(raw: unknown): PersistedState {
   return {
     version: 1,
     downloads: Array.isArray(obj.downloads) ? obj.downloads.filter(isDownload) : [],
-    queues: Array.isArray(obj.queues) && obj.queues.length > 0
-      ? obj.queues.filter(isQueue)
-      : base.queues,
+    queues:
+      Array.isArray(obj.queues) && obj.queues.length > 0 ? obj.queues.filter(isQueue) : base.queues,
     settings: { ...base.settings, ...(obj.settings ?? {}) },
   };
 }
