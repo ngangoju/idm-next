@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Settings } from '../shared/protocol.ts';
+import type { Settings, Theme } from '../shared/protocol.ts';
 
 /** Speed caps are stored in bytes/sec but nobody thinks in bytes/sec. */
 const toMBps = (bps: number): string => (bps > 0 ? (bps / (1024 * 1024)).toFixed(1) : '');
@@ -7,6 +7,12 @@ const fromMBps = (v: string): number => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.round(n * 1024 * 1024) : 0;
 };
+
+const THEMES: Array<[Theme, string]> = [
+  ['light', 'Light'],
+  ['dark', 'Dark'],
+  ['system', 'Match system'],
+];
 
 export function SettingsDialog({
   settings,
@@ -36,6 +42,24 @@ export function SettingsDialog({
         }}
       >
         <h2>Settings</h2>
+
+        <div className="field">
+          <span className="field-label">Appearance</span>
+          <div className="segmented" role="radiogroup" aria-label="Appearance">
+            {THEMES.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={draft.theme === value}
+                className={draft.theme === value ? 'on' : ''}
+                onClick={() => set('theme', value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <label>
           Download folder
@@ -105,7 +129,16 @@ export function SettingsDialog({
             checked={draft.autoOpenDetails}
             onChange={(e) => set('autoOpenDetails', e.target.checked)}
           />
-          Show the detail window when a download starts
+          Show a progress window when a download starts
+        </label>
+
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={draft.autoCloseDetails}
+            onChange={(e) => set('autoCloseDetails', e.target.checked)}
+          />
+          Close it when the download finishes
         </label>
 
         <label className="check">

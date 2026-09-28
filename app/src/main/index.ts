@@ -6,12 +6,13 @@
  * window-all-closed. Quitting from the tray is what actually stops transfers,
  * which is also how IDM behaves.
  */
-import { app, BrowserWindow, Tray, Menu, nativeImage, clipboard, Notification, shell, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, nativeTheme, clipboard, Notification, shell, dialog, ipcMain } from 'electron';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { Store } from './store.ts';
 import { DownloadManager } from './manager.ts';
 import { ControlServer } from './server.ts';
+import { shouldAutoOpen } from './detail.ts';
 import { DEFAULT_PORT } from '../shared/protocol.ts';
 
 /**
@@ -83,12 +84,33 @@ async function main(): Promise<void> {
     );
   }
 
+  applyTheme();
+  manager.on('settings', applyTheme);
+
   createWindow();
   createTray();
   startClipboardMonitor();
   wireNotifications();
 
   app.on('activate', () => showWindow());
+}
+
+/**
+ * The window background shows for a frame before the page paints, so it has to
+ * match the theme or every window flashes the wrong colour as it opens.
+ */
+function windowBackground(): string {
+  return nativeTheme.shouldUseDarkColors ? '#0b0d11' : '#f4f5f7';
+}
+
+/**
+ * The theme setting drives Electron's own theme, which is what the pages read
+ * through `prefers-color-scheme` — and what colours the macOS title bar.
+ */
+function applyTheme(): void {
+  nativeTheme.themeSource = manager.settings.theme ?? 'light';
+  const bg = windowBackground();
+  for (const win of BrowserWindow.getAllWindows()) win.setBackgroundColor(bg);
 }
 
 function createWindow(): void {
@@ -98,7 +120,7 @@ function createWindow(): void {
     minWidth: 860,
     minHeight: 480,
     title: 'IDM-Next',
-    backgroundColor: '#0b0d11',
+    backgroundColor: windowBackground(),
     // Frameless with inset traffic lights: the sidebar runs to the top edge
     // and the app stops looking like a web page in a window. The renderer
     // reserves space for the lights and marks its own drag regions.
@@ -143,6 +165,68 @@ function showWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+/**
+ * One progress window per download, opened by the download itself.
+ *
+ * It has to be a real window rather than a panel in the list, because it
+ * appears while the browser is in front. A modal inside an app window that
+ * nobody raised is invisible, which is exactly how this looked before.
+ */
+const detailWindows = new Map<string, BrowserWindow>();
+const DETAIL_WIDTH = 440;
+const AUTO_CLOSE_DELAY_MS = 1600;
+
+function openDetailWindow(id: string): void {
+  const existing = detailWindows.get(id);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+    return;
+  }
+
+  const win = new BrowserWindow({
+    // Small on purpose: it sits over the browser the download came from, and
+    // the page sizes it to its content through fitHeight.
+    width: DETAIL_WIDTH,
+    height: 230,
+    useContentSize: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    backgroundColor: windowBackground(),
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 12, y: 12 },
+    title: 'Download',
+    webPreferences: {
+      preload: join(appDir, '../preload/index.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devUrl) {
+    void win.loadURL(`${devUrl}?detail=${encodeURIComponent(id)}`);
+  } else {
+    void win.loadFile(join(appDir, '../renderer/index.html'), { query: { detail: id } });
+  }
+
+  win.once('ready-to-show', () => {
+    win.show();
+    // Bring it in front of the browser the download was started from, which is
+    // the whole point of the window. On macOS a window of a background app
+    // does not come forward on show() alone — the app has to take focus first.
+    app.focus({ steal: true });
+    win.focus();
+  });
+  win.on('closed', () => detailWindows.delete(id));
+
+  detailWindows.set(id, win);
 }
 
 function createTray(): void {
@@ -253,6 +337,25 @@ export function looksLikeDownloadable(text: string, extensions: string[]): boole
 }
 
 function wireNotifications(): void {
+  manager.on('added', (record) => {
+    if (shouldAutoOpen(record, manager.settings, detailWindows.size)) openDetailWindow(record.id);
+  });
+  // Asking for a download again is as much a start as the first time.
+  manager.on('restarted', (record) => {
+    if (shouldAutoOpen(record, manager.settings, detailWindows.size)) openDetailWindow(record.id);
+  });
+
+  // Done means done: the window has nothing left to report. A short pause
+  // first, so the finished state is seen rather than the window just vanishing;
+  // the completion notification carries on from there.
+  manager.on('done', (record) => {
+    const win = detailWindows.get(record.id);
+    if (!win || !manager.settings.autoCloseDetails) return;
+    setTimeout(() => {
+      if (!win.isDestroyed()) win.close();
+    }, AUTO_CLOSE_DELAY_MS);
+  });
+
   manager.on('done', (record) => {
     const n = new Notification({
       title: 'Download complete',
@@ -275,6 +378,18 @@ function wireNotifications(): void {
   });
   ipcMain.handle('idm:port', () => DEFAULT_PORT);
   ipcMain.handle('idm:token', () => AUTH_TOKEN);
+  ipcMain.handle('idm:open-detail', (_e, id: string) => openDetailWindow(id));
+  ipcMain.handle('idm:fit-height', (e, px: number) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win === mainWindow || !Number.isFinite(px)) return;
+    win.setContentSize(DETAIL_WIDTH, Math.round(Math.min(Math.max(px, 140), 720)));
+  });
+  // A detail window closes itself; the list window must not be closeable this
+  // way, or a stray call would hide the app.
+  ipcMain.handle('idm:close-self', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (win && win !== mainWindow) win.close();
+  });
 }
 
 /** Shutdown-on-complete, behind a countdown the user can cancel. */

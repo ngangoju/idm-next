@@ -274,6 +274,42 @@ export function isUnfetchableStream(contentType) {
 }
 
 /**
+ * One piece of an adaptive stream rather than a whole file.
+ *
+ * X plays video as DASH: the player fetches hundreds of `.m4s` segments, each
+ * a second or two long, served as video/mp4. Recorded as files, each looked
+ * like a download — and one downloaded gave a 1 MB fragment that is not the
+ * video and often will not play at all without its init segment. Like SABR,
+ * seeing one is a sign to offer the page to yt-dlp, which assembles the whole
+ * stream.
+ */
+const FRAGMENT_EXTENSIONS = ['m4s', 'cmfv', 'cmfa'];
+
+export function isStreamFragment(url) {
+  return FRAGMENT_EXTENSIONS.includes(extensionOf(url));
+}
+
+/**
+ * A page title, as the name for something downloaded from it.
+ *
+ * Site suffixes go ("… - YouTube", "… / X"), and X's own format —
+ * `Name on X: "the post text" / X` — becomes `Name - the post text`, without
+ * the t.co link that ends most posts.
+ */
+export function cleanPageTitle(raw) {
+  let t = (raw ?? '')
+    .replace(/^\(\d+\)\s*/, '')
+    .replace(/\s*[-–—|•·/]\s*(YouTube|Instagram|Vimeo|Facebook|X|Twitter|TikTok|Reddit)\s*$/i, '')
+    .trim();
+  const post = /^(.*?) on (?:X|Twitter): ["“]([\s\S]*)["”]$/.exec(t);
+  if (post) t = `${post[1]} - ${post[2]}`;
+  return t
+    .replace(/\s*https?:\/\/t\.co\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Was this response at least media-adjacent?
  *
  * Used to decide whether a rejection is worth reporting. A rejected stylesheet
@@ -305,6 +341,9 @@ export function classify({ url, contentType, size, contentDisposition }) {
   if (isNoiseUrl(url)) return { ok: false, reason: 'telemetry or subtitle endpoint' };
   if (isUnfetchableStream(ct)) {
     return { ok: false, reason: 'YouTube SABR/UMP stream — not fetchable by URL' };
+  }
+  if (isStreamFragment(url)) {
+    return { ok: false, reason: 'a fragment of a streamed video, not the whole file' };
   }
   if (!shouldRecordInner({ url, contentType, size, contentDisposition })) {
     const floored =

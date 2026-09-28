@@ -22,6 +22,8 @@ import {
   extensionOf,
   filenameOf,
   MIN_MEDIA_BYTES,
+  cleanPageTitle,
+  isStreamFragment,
 } from './shared.js';
 
 const BIG = MIN_MEDIA_BYTES * 10;
@@ -526,5 +528,45 @@ describe('Instagram reel page', () => {
     for (const n of ['videoplayback', 'watch', 'index.m3u8', 'master.mpd', 'download']) {
       assert.equal(looksOpaqueName(n), true, n);
     }
+  });
+});
+
+describe('X (Twitter)', () => {
+  // From a real download: the page's title, used as the file's name.
+  const TITLE = 'PRINCIPAL 🇺🇬 on X: "You have to be creative to survive 🤣🤣🤣🙌 https://t.co/cngbc6BG3x" / X';
+  const FRAGMENT =
+    'https://video.twimg.com/amplify_video/2102308025285443584/vid/avc1/57000/61400/720x1280/NdMhp7af9qaNmY8L.m4s';
+
+  test('a post title becomes a readable name', () => {
+    assert.equal(
+      cleanPageTitle(TITLE),
+      'PRINCIPAL 🇺🇬 - You have to be creative to survive 🤣🤣🤣🙌',
+    );
+  });
+
+  test('the " / X" suffix goes, like " - YouTube" does', () => {
+    assert.equal(cleanPageTitle('Home / X'), 'Home');
+    assert.equal(cleanPageTitle('Some video - YouTube'), 'Some video');
+    assert.equal(cleanPageTitle('(3) Some video - YouTube'), 'Some video');
+  });
+
+  test('a title that is not a post is left alone', () => {
+    assert.equal(cleanPageTitle('Annual report 2026'), 'Annual report 2026');
+    assert.equal(cleanPageTitle(''), '');
+  });
+
+  test('a DASH fragment is not offered as a file', () => {
+    // 1 MB of a video that needs its init segment to play. Downloading it
+    // produced a file that was neither named nor usable.
+    assert.equal(isStreamFragment(FRAGMENT), true);
+    const verdict = classify({ url: FRAGMENT, contentType: 'video/mp4', size: 1_170_586 });
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.reason, /fragment/);
+  });
+
+  test('a whole file from the same CDN still is', () => {
+    const whole = 'https://video.twimg.com/ext_tw_video/1/pu/vid/720x1280/abc.mp4?tag=12';
+    assert.equal(isStreamFragment(whole), false);
+    assert.equal(classify({ url: whole, contentType: 'video/mp4', size: 5_000_000 }).ok, true);
   });
 });

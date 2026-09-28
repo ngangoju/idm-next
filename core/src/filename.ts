@@ -108,17 +108,87 @@ function clampBytes(name: string, maxBytes: number): string {
 }
 
 /**
+ * The extension a Content-Type implies, for names that arrive without one.
+ *
+ * Deliberately short: only types a person would expect to double-click. An
+ * HTML response is not in it — a "download" that turns out to be a page is
+ * almost always an error or a login wall, and naming it .html hides that.
+ */
+const TYPE_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/avif': 'avif',
+  'image/heic': 'heic',
+  'image/svg+xml': 'svg',
+  'image/bmp': 'bmp',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+  'video/x-matroska': 'mkv',
+  'video/mp2t': 'ts',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/aac': 'aac',
+  'audio/ogg': 'ogg',
+  'audio/opus': 'opus',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/flac': 'flac',
+  'application/pdf': 'pdf',
+  'application/zip': 'zip',
+  'application/x-7z-compressed': '7z',
+  'application/vnd.rar': 'rar',
+  'application/x-rar-compressed': 'rar',
+  'application/gzip': 'gz',
+  'application/x-apple-diskimage': 'dmg',
+  'application/vnd.android.package-archive': 'apk',
+  'application/epub+zip': 'epub',
+  'application/json': 'json',
+  'text/plain': 'txt',
+  'text/csv': 'csv',
+};
+
+export function extensionForType(contentType: string | null | undefined): string | null {
+  if (!contentType) return null;
+  const mime = contentType.split(';')[0]!.trim().toLowerCase();
+  return TYPE_EXTENSIONS[mime] ?? null;
+}
+
+/**
+ * Does this name already carry a real extension?
+ *
+ * `extname` alone says yes to "v1.2" and "Mr. Robot"; an extension is short
+ * and has at least one letter in it.
+ */
+function hasExtension(name: string): boolean {
+  const ext = extname(name).slice(1);
+  return ext.length >= 1 && ext.length <= 5 && /^[a-z0-9]+$/i.test(ext) && /[a-z]/i.test(ext);
+}
+
+/**
  * Pick the final name, in precedence order, and sanitize it.
  * `override` is trusted less than it looks — it still goes through sanitize.
+ *
+ * A name with no extension gets one from the Content-Type. Plenty of CDNs
+ * serve files from paths that never had one — X's images live at
+ * `/media/<id>?format=jpg` — and a file with no extension is one the OS will
+ * not open.
  */
 export function resolveFilename(opts: {
   override?: string | undefined;
   /** Already-parsed name from Content-Disposition, if the server sent one. */
   suggested?: string | null | undefined;
   url: string;
+  contentType?: string | null | undefined;
 }): string {
   const candidate = opts.override ?? opts.suggested ?? nameFromUrl(opts.url);
-  return sanitizeFilename(candidate ?? 'download');
+  const name = sanitizeFilename(candidate ?? 'download');
+  if (hasExtension(name)) return name;
+  const ext = extensionForType(opts.contentType);
+  return ext ? sanitizeFilename(`${name}.${ext}`) : name;
 }
 
 /**

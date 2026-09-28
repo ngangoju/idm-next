@@ -13,12 +13,13 @@ export {
   sanitizeFilename,
   parseContentDisposition,
   resolveFilename,
+  extensionForType,
   nameFromUrl,
   safeJoin,
   uniquePath,
 } from './filename.ts';
 export { TokenBucket, RateLimiter } from './throttle.ts';
-export { JournalWriter, readJournal, journalPath, partPath } from './journal.ts';
+export { JournalWriter, readJournal, journalPath, partPath, reserveTarget } from './journal.ts';
 export { PartFileWriter, ensureSpace, hashFile, fileSize } from './writer.ts';
 export {
   backoffMs,

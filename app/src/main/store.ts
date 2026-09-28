@@ -35,6 +35,8 @@ export function defaultSettings(): Settings {
     postDownloadCommand: null,
     shutdownWhenQueueDone: false,
     autoOpenDetails: true,
+    autoCloseDetails: true,
+    theme: 'light',
     ytdlpPath: 'yt-dlp',
     ffmpegPath: 'ffmpeg',
     proxy: null,

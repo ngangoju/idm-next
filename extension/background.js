@@ -17,6 +17,8 @@ import {
   isSiteName,
   looksMediaAdjacent,
   isUnfetchableStream,
+  isStreamFragment,
+  cleanPageTitle,
   recordReject,
   getRejects,
   parseContentRangeTotal,
@@ -80,7 +82,10 @@ async function recordIfMedia(details) {
         reason: verdict.reason,
         at: Date.now(),
       });
-      if (isUnfetchableStream(contentType)) {
+      // The `sabr:` flag has come to mean "this page streams media that no
+      // single URL can capture", which is what the panel acts on: it offers
+      // the page itself to yt-dlp. X's DASH fragments are the same situation.
+      if (isUnfetchableStream(contentType) || isStreamFragment(details.url)) {
         await chrome.storage.session.set({ [`sabr:${details.tabId}`]: true });
         notifyTab(details.tabId);
       }
@@ -129,12 +134,6 @@ async function recordIfMedia(details) {
  * "Clip • Instagram" and "Something - YouTube" are the page's name for the
  * media once the suffix is gone, which is what the list should say.
  */
-function cleanPageTitle(raw) {
-  return raw
-    .replace(/\s*[-–—|•·]\s*(YouTube|Instagram|Vimeo|Facebook|X|Twitter|TikTok|Reddit)\s*$/i, '')
-    .replace(/^\(\d+\)\s*/, '')
-    .trim();
-}
 
 /**
  * Tell the page's panel its list changed. The content script cannot poll for

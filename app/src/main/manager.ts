@@ -6,11 +6,14 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { exec } from 'node:child_process';
 import {
   Download,
   TokenBucket,
+  journalPath,
+  partPath,
   hashFile,
   probe,
   makeDispatcher,
@@ -36,6 +39,7 @@ export interface ManagerEvents {
   done: [DownloadRecord];
   failed: [{ id: string; error: string }];
   removed: [{ id: string }];
+  restarted: [DownloadRecord];
   'queue-drained': [Queue];
   settings: [Settings];
 }
@@ -161,6 +165,9 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       // An explicit flag wins; otherwise guess from the URL now and correct it
       // from the probe's content type once the download actually starts.
       useYtdlp: viaYtdlp,
+      ...(req.useYtdlp === undefined && viaYtdlp && !isStreamManifest(req.url)
+        ? { routeUnverified: true }
+        : {}),
     };
 
     this.store.update((s) => {
@@ -170,20 +177,37 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       }
     });
 
-    this.emit('added', record);
+    // Start first, announce second. The record is built `paused` because that
+    // is its state until something starts it, and announcing at that point told
+    // every listener "this one is queued" even for a download already running —
+    // which is why nothing could tell a starting transfer from a parked one.
+    // resume() only emits through the batched progress tick, so an 'added'
+    // emitted synchronously after it still reaches clients first.
     if (!req.startPaused) this.resume(record.id, req.headers);
+    this.emit('added', record);
     return record;
   }
 
   resume(id: string, headers?: Record<string, string>): void {
     const record = this.records.find((d) => d.id === id);
-    if (!record || this.live.has(id)) return;
+    // Either kind of transfer already running: a second one would race it for
+    // the same file.
+    if (!record || this.live.has(id) || this.external.has(id)) return;
     if (record.status === 'completed') return;
 
     if (this.activeCount >= this.store.settings.maxConcurrentDownloads) {
       // Over the concurrency budget: leave it queued and let a completion
       // pull it in.
       this.setStatus(id, 'paused');
+      return;
+    }
+
+    // "Looks like a page" was only a guess from the URL, and an extensionless
+    // path is as often a file as a page — X serves every image from
+    // /media/<id>. Ask the server first; yt-dlp turned those into
+    // "<id>.unknown_video".
+    if (record.useYtdlp && record.routeUnverified) {
+      void this.verifyRoute(record, headers);
       return;
     }
 
@@ -215,6 +239,52 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
     dl.on('stale', ({ reason }) => this.onError(id, new Error(`Remote file changed: ${reason}`)));
 
     void dl.start();
+  }
+
+  /**
+   * Settle a guessed route by asking the server what the URL actually is.
+   *
+   * Held in `external` while it runs, so it counts against the concurrency
+   * budget and a pause or cancel in the meantime stops it like any transfer.
+   */
+  private async verifyRoute(record: DownloadRecord, headers?: Record<string, string>): Promise<void> {
+    const controller = new AbortController();
+    this.external.set(record.id, controller);
+    this.setStatus(record.id, 'probing');
+
+    let route: 'engine' | 'ytdlp' = 'ytdlp';
+    try {
+      const dispatcher = makeDispatcher({ proxy: this.store.settings.proxy ?? undefined });
+      const info = await probe({ url: record.url, headers, dispatcher, signal: controller.signal });
+      route = routeFor(info.contentType);
+    } catch {
+      // Pages often refuse a ranged probe. Keep the guess: yt-dlp will say
+      // plainly if it cannot handle the URL either.
+    }
+
+    if (controller.signal.aborted) return;
+    this.external.delete(record.id);
+
+    this.store.update((s) => {
+      const d = s.downloads.find((x) => x.id === record.id);
+      if (!d) return;
+      delete d.routeUnverified;
+      if (route === 'engine') {
+        d.useYtdlp = false;
+        // "Video from x.com" was a placeholder for a page; this is a file. The
+        // folder was chosen for that guess too — only move it if it is still
+        // the guess's default, never one the user picked.
+        if (d.filename === pageLabel(d.url)) {
+          const guessedDir = d.destDir === this.destDirFor('video');
+          d.filename = guessName(d.url);
+          d.category = categoryFor(d.filename);
+          if (guessedDir) d.destDir = this.destDirFor(d.category);
+          d.filePath = join(d.destDir, d.filename);
+        }
+      }
+    });
+
+    this.resume(record.id, headers);
   }
 
   /**
@@ -361,6 +431,74 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
     this.pumpQueue();
   }
 
+  /**
+   * Download again, from nothing.
+   *
+   * Not the same as resume. Resume continues from the journal, which is right
+   * after a dropped connection and exactly wrong when the journal is the
+   * problem: once the file changes on the server every resume fails the same
+   * way, forever. So this throws the partial data away.
+   *
+   * It never touches a finished file. If the old one is still there the new
+   * copy lands beside it as "name (1).ext" — the engine's collision handling
+   * does that already — because someone who deleted it wants it back and
+   * someone who didn't has not asked to lose it.
+   */
+  async restart(id: string): Promise<DownloadRecord | null> {
+    const record = this.records.find((d) => d.id === id);
+    if (!record) return null;
+
+    // Stop whatever is running, without the queue pulling something else into
+    // the slot this is about to take back.
+    this.external.get(id)?.abort();
+    this.external.delete(id);
+    const dl = this.live.get(id);
+    if (dl) {
+      await dl.cancel();
+      this.live.delete(id);
+    }
+
+    if (record.status !== 'completed') {
+      await Promise.all(
+        [partPath(record.filePath), journalPath(record.filePath)].map((p) =>
+          rm(p, { force: true }).catch(() => undefined),
+        ),
+      );
+    }
+
+    this.store.update((s) => {
+      const d = s.downloads.find((x) => x.id === id);
+      if (!d) return;
+      d.status = 'paused';
+      d.downloaded = 0;
+      d.totalSize = null;
+      d.rateBps = 0;
+      d.etaSeconds = null;
+      d.segments = [];
+      delete d.error;
+      delete d.completedAt;
+      if (d.checksum) delete d.checksum.verified;
+    });
+
+    this.resume(id);
+    const fresh = this.records.find((d) => d.id === id) ?? null;
+    if (fresh) this.emit('restarted', fresh);
+    return fresh;
+  }
+
+  /**
+   * The list as clients should see it: each finished download says whether
+   * its file is still on disk.
+   *
+   * Worked out when asked rather than stored, because the answer changes
+   * whenever someone empties a folder, and nothing tells us when they do.
+   */
+  snapshot(): DownloadRecord[] {
+    return this.records.map((d) =>
+      d.status === 'completed' && !existsSync(d.filePath) ? { ...d, fileMissing: true } : d,
+    );
+  }
+
   async pauseAll(): Promise<void> {
     await Promise.all([...this.live.keys()].map((id) => this.pause(id)));
   }
@@ -406,7 +544,7 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       d.rateBps = p.rateBps;
       d.etaSeconds = p.etaSeconds;
       d.segments = [...p.segments];
-      d.filePath = p.filePath || d.filePath;
+      if (p.filePath && p.filePath !== d.filePath) adoptPath(d, p.filePath);
       if (p.status === 'downloading') d.status = 'downloading';
     });
     this.dirtyProgress.add(id);
@@ -426,7 +564,7 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       const d = s.downloads.find((x) => x.id === id);
       if (!d) return;
       d.status = 'completed';
-      d.filePath = dl.path;
+      adoptPath(d, dl.path);
       d.rateBps = 0;
       d.downloaded = d.totalSize ?? d.downloaded;
       d.completedAt = new Date().toISOString();
@@ -522,6 +660,27 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
  * a URL with no extension that turns out to serve a real file still takes the
  * fast path.
  */
+/**
+ * Where a URL should go, judged by what it serves. Only a page or a stream
+ * manifest needs yt-dlp; anything else is a file, and the segmented engine is
+ * both faster and names it properly.
+ */
+export function routeFor(contentType: string | null): 'engine' | 'ytdlp' {
+  if (!contentType) return 'ytdlp';
+  const mime = contentType.split(';')[0]!.trim().toLowerCase();
+  if (mime === 'text/html' || mime === 'application/xhtml+xml') return 'ytdlp';
+  if (mime.includes('mpegurl') || mime === 'application/dash+xml') return 'ytdlp';
+  return 'engine';
+}
+
+function isStreamManifest(url: string): boolean {
+  try {
+    return /\.(m3u8|mpd)$/i.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function looksLikePage(url: string): boolean {
   try {
     const u = new URL(url);
@@ -590,6 +749,21 @@ function pageLabel(url: string): string {
   } catch {
     return 'Video';
   }
+}
+
+/**
+ * Take the name the engine actually wrote to.
+ *
+ * It can differ from the one guessed at add time: a collision adds " (1)",
+ * and a URL with no extension gets one from the Content-Type. The list shows
+ * `filename`, so updating only the path left X's images listed as
+ * "GiQ4vJ2XIAAxm6v" while a .jpg sat on disk.
+ */
+function adoptPath(d: DownloadRecord, filePath: string): void {
+  d.filePath = filePath;
+  d.filename = basename(filePath);
+  // Filed under Other while the name had no extension to go on.
+  if (d.category === 'other') d.category = categoryFor(d.filename);
 }
 
 function guessName(url: string): string {

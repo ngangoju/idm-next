@@ -42,11 +42,21 @@ export interface DownloadRecord {
    * adaptive streams, which have no single ranged URL to split.
    */
   useYtdlp?: boolean;
+  /**
+   * `useYtdlp` was guessed from the URL's shape, not asked for. Checked
+   * against what the URL actually serves before anything is downloaded.
+   */
+  routeUnverified?: boolean;
   /** yt-dlp format id, when the user picked one. */
   formatId?: string;
   error?: string;
   createdAt: string;
   completedAt?: string;
+  /**
+   * Finished, but the file is no longer where it was saved. Computed when the
+   * list is sent, never stored.
+   */
+  fileMissing?: boolean;
   /** Expected hash, if the user supplied one. */
   checksum?: { algorithm: 'md5' | 'sha1' | 'sha256'; value: string; verified?: boolean };
 }
@@ -61,6 +71,9 @@ export interface Queue {
   stopAt?: string;
   enabled: boolean;
 }
+
+/** 'system' follows the OS. Light is the default. */
+export type Theme = 'light' | 'dark' | 'system';
 
 export interface Settings {
   /** Root for category subfolders. */
@@ -78,8 +91,11 @@ export interface Settings {
   /** Shell command run after a download completes; {file} is substituted. */
   postDownloadCommand: string | null;
   shutdownWhenQueueDone: boolean;
-  /** Open the detail window when a download starts, the way IDM does. */
+  /** Open the progress window when a download starts, the way IDM does. */
   autoOpenDetails: boolean;
+  /** Close it again once the download has finished. */
+  autoCloseDetails: boolean;
+  theme: Theme;
   ytdlpPath: string;
   ffmpegPath: string;
   proxy: string | null;
@@ -150,6 +166,7 @@ export type ServerEvent =
       'id' | 'status' | 'downloaded' | 'totalSize' | 'rateBps' | 'etaSeconds' | 'segments'
       | 'filename' | 'category' | 'filePath' | 'error'>[] }
   | { type: 'download-added'; download: DownloadRecord }
+  | { type: 'download-restarted'; download: DownloadRecord }
   | { type: 'download-done'; download: DownloadRecord }
   | { type: 'download-error'; id: string; error: string }
   | { type: 'download-removed'; id: string }
@@ -179,7 +196,9 @@ export function humanizeError(raw: string): string {
   if (e.includes('enotfound') || e.includes('getaddrinfo')) return 'Could not reach that server';
   if (e.includes('etimedout') || e.includes('timeout')) return 'The server stopped responding';
   if (e.includes('econnreset')) return 'The connection dropped';
-  if (e.includes('remote file changed')) return 'The file changed on the server — start again';
+  if (e.includes('remote file changed')) {
+    return 'The file changed on the server, so this cannot pick up where it stopped — download it again';
+  }
   if (e.includes('403')) return 'The server refused this download (403)';
   if (e.includes('404')) return 'That file is no longer there (404)';
   if (e.includes('429')) return 'The server is rate-limiting us — try later';

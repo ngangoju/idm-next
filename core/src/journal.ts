@@ -5,7 +5,8 @@
  * the write leaves the previous good journal intact rather than a truncated one.
  * Debounced, because fsyncing on every chunk would dominate the transfer.
  */
-import { writeFile, readFile, rename, unlink } from 'node:fs/promises';
+import { writeFile, readFile, rename, unlink, access, mkdir, open } from 'node:fs/promises';
+import { dirname, extname } from 'node:path';
 import type { Journal, SegmentState } from './types.ts';
 
 const DEBOUNCE_MS = 1000;
@@ -102,4 +103,43 @@ function isJournal(v: unknown): v is Journal {
       seg.cursor! <= seg.end! + 1
     );
   });
+}
+
+/**
+ * Claim a path for a download that is about to start from nothing.
+ *
+ * A download in progress has only its `.part` and journal on disk, so checking
+ * the finished name alone let a second download of "video.mp4" pick the same
+ * path and write into the first one's part file: whichever finished first
+ * renamed it, the other died with ENOENT, and two different files sharing a
+ * name would have been merged into one. So the sidecars take the name too,
+ * and the part is created with O_EXCL — two downloads racing for one name
+ * cannot both win.
+ */
+export async function reserveTarget(target: string): Promise<string> {
+  const ext = extname(target);
+  const stem = ext ? target.slice(0, -ext.length) : target;
+  await mkdir(dirname(target), { recursive: true });
+
+  for (let i = 0; i < 10_000; i++) {
+    const candidate = i === 0 ? target : `${stem} (${i})${ext}`;
+    if ((await taken(candidate)) || (await taken(journalPath(candidate)))) continue;
+    try {
+      await (await open(partPath(candidate), 'wx')).close();
+      return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue;
+      throw err;
+    }
+  }
+  throw new Error(`No free filename near ${target}`);
+}
+
+async function taken(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
 }

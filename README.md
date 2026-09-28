@@ -19,7 +19,7 @@ idm-next/
 
 ```bash
 npm install
-npm test           # 179 tests across core, app and extension
+npm test           # 209 tests across core, app and extension
 npm start          # build and launch the desktop app
 npm run dist       # package a .dmg / .nsis / .AppImage
 npm run bench -w core   # measure download throughput
@@ -118,12 +118,37 @@ auto-sorting, global and per-download speed caps, proxy support, cookie/referer
 passthrough, clipboard monitoring, checksum verification, a post-download
 command hook, and shutdown-when-the-queue-finishes.
 
-**The detail window.** Click any download — or let it open itself as a
-transfer starts, the way IDM does — for size, rate, time left, resume
-capability, and a table of every connection with its own progress. That last
-part is the thing a single progress bar cannot express: each row is one HTTP
-connection working its own byte range, and because segments are split by work
-stealing the list grows and the shares move while you watch.
+**The progress window.** A download gets its own small window, and opens it by
+itself as the transfer starts, the way IDM does: how far, how fast, how long,
+with the per-connection table one click away. It sizes itself to its content,
+carries the live percentage in its title, and closes itself shortly after the
+download finishes (both behaviours are switchable in Settings). It is a real
+window rather than a panel in the list because the download usually starts
+from the browser, and a panel inside an app window nobody raised is
+indistinguishable from nothing happening. Up to four open on their own; past
+that a batch goes quietly into the list.
+
+**Download again.** Failed, stopped and finished downloads can all be started
+over from nothing. That is different from resume, which continues from the
+journal — right after a dropped connection, and exactly wrong once the file has
+changed on the server, where every resume fails the same way. A finished file
+is never overwritten: if it is still there the new copy lands beside it as
+`name (1).ext`. A finished download whose file has since been deleted is marked
+*File missing* (re-checked whenever the window regains focus).
+
+**Light and dark.** Light is the default; Settings switches to dark or to
+following the system. Every colour is a token, so both themes are the same
+stylesheet with different values, and the setting drives Electron's own theme
+— so the pages, the title bar and the window background always agree and
+nothing flashes the wrong colour on open.
+
+**Names that open.** A URL with no extension in its path gets one from the
+Content-Type. X serves every image from `/media/<id>?format=jpg`, and those
+used to be treated as web pages and handed to yt-dlp, which saved them as
+`<id>.unknown_video`. A URL is now only sent to yt-dlp after the server says it
+is actually a page or a stream manifest. On X, the extension also recognises
+`.m4s` DASH fragments — a second or two of video, not the video — and offers
+the post to yt-dlp instead, which assembles the whole thing.
 
 ## Speed
 

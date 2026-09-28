@@ -313,3 +313,112 @@ describe('cancel', () => {
     }
   });
 });
+
+describe('naming', () => {
+  test('an extensionless URL is saved with the extension its type implies', async () => {
+    const body = makeBody(200_000);
+    const fx = await startFixture({ body, contentType: 'image/jpeg' });
+    const dest = await tempDir();
+    try {
+      // The shape of an X image URL: no extension in the path, format in the query.
+      const url = fx.url.replace('/file.bin', '/media/GiQ4vJ2XIAAxm6v?format=jpg&name=large');
+      const dl = new Download({ url, destDir: dest, connections: 2 });
+      const done = once(dl, 'done');
+      await dl.start();
+      await done;
+      assert.equal(basename(dl.path), 'GiQ4vJ2XIAAxm6v.jpg');
+      assert.equal(sha256(await readFile(dl.path)), sha256(body));
+    } finally {
+      await fx.close();
+    }
+  });
+});
+
+describe('two downloads with the same name at once', () => {
+  test('get separate files, each byte-exact', async () => {
+    // Different files that happen to share a name — two "video.mp4"s from two
+    // sites. Checking only the finished name let both claim one part file.
+    const a = makeBody(3 * MB, 1);
+    const b = makeBody(3 * MB, 2);
+    const slow = (body: Buffer) => ({ body, slowRange: { from: 0, to: body.length, bps: 2 * MB } });
+    const fa = await startFixture(slow(a));
+    const fb = await startFixture(slow(b));
+    const dest = await tempDir();
+    try {
+      const da = new Download({ url: fa.url.replace('file.bin', 'video.mp4'), destDir: dest, connections: 4 });
+      const db = new Download({ url: fb.url.replace('file.bin', 'video.mp4'), destDir: dest, connections: 4 });
+      const done = Promise.all([once(da, 'done'), once(db, 'done')]);
+      await Promise.all([da.start(), db.start()]);
+      await done;
+
+      assert.notEqual(da.path, db.path);
+      assert.deepEqual(
+        [basename(da.path), basename(db.path)].sort(),
+        ['video (1).mp4', 'video.mp4'],
+      );
+      assert.equal(sha256(await readFile(da.path)), sha256(a));
+      assert.equal(sha256(await readFile(db.path)), sha256(b));
+    } finally {
+      await fa.close();
+      await fb.close();
+    }
+  });
+});
+
+describe('the journal', () => {
+  test('lives beside the file actually being written, not the name that was wanted', async () => {
+    const body = makeBody(3 * MB);
+    const fx = await startFixture({ body, slowRange: { from: 0, to: body.length, bps: 1 * MB } });
+    const dest = await tempDir();
+    try {
+      // Someone else's finished file already has the name.
+      await writeFile(join(dest, 'file.bin'), 'not ours');
+
+      const dl = new Download({ url: fx.url, destDir: dest, connections: 2 });
+      void dl.start().catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 300));
+      await dl.pause();
+
+      assert.equal(basename(dl.path), 'file (1).bin');
+      assert.ok(await readJournal(journalPath(dl.path)), 'journal beside our own part file');
+      assert.equal(
+        await readJournal(journalPath(join(dest, 'file.bin'))),
+        null,
+        'nothing beside the other file for a later download to mistake for its own',
+      );
+    } finally {
+      await fx.close();
+    }
+  });
+
+  test('a second download of the same URL cannot overwrite the first', async () => {
+    const body = makeBody(2 * MB);
+    const fx = await startFixture({ body, slowRange: { from: 0, to: body.length, bps: 1 * MB } });
+    const dest = await tempDir();
+    try {
+      // First copy, complete.
+      const first = new Download({ url: fx.url, destDir: dest, connections: 2 });
+      delete fx.options.slowRange;
+      await first.start();
+      assert.equal(sha256(await readFile(first.path)), sha256(body));
+
+      // Second copy of the same URL: paused part-way, so it leaves resume state.
+      fx.options.slowRange = { from: 0, to: body.length, bps: 1 * MB };
+      const second = new Download({ url: fx.url, destDir: dest, connections: 2 });
+      void second.start().catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 300));
+      await second.pause();
+
+      // Third: must not pick up the second's journal as if it were the first file's.
+      delete fx.options.slowRange;
+      const third = new Download({ url: fx.url, destDir: dest, connections: 2 });
+      await third.start();
+
+      assert.equal(sha256(await readFile(first.path)), sha256(body), 'the first file is untouched');
+      assert.equal(sha256(await readFile(third.path)), sha256(body));
+      assert.notEqual(third.path, first.path);
+    } finally {
+      await fx.close();
+    }
+  });
+});

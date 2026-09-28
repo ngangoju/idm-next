@@ -12,8 +12,8 @@ import {
   type WorkerSegment,
 } from './segments.ts';
 import { PartFileWriter, ensureSpace } from './writer.ts';
-import { JournalWriter, readJournal, journalPath, partPath } from './journal.ts';
-import { resolveFilename, safeJoin, uniquePath } from './filename.ts';
+import { JournalWriter, readJournal, journalPath, partPath, reserveTarget } from './journal.ts';
+import { resolveFilename, safeJoin } from './filename.ts';
 import { TokenBucket, RateLimiter } from './throttle.ts';
 import {
   DEFAULT_RETRY,
@@ -129,6 +129,7 @@ export class Download extends EventEmitter<DownloadEvents> {
       override: this.opts.filename,
       suggested: info.suggestedName,
       url: info.url,
+      contentType: info.contentType,
     });
     const target = safeJoin(this.opts.destDir, name);
     this.totalSize = info.totalSize;
@@ -148,7 +149,9 @@ export class Download extends EventEmitter<DownloadEvents> {
       resuming = true;
     }
 
-    this.filePath = resuming ? target : await uniquePath(target);
+    // Resuming continues our own part file. Anything else claims a name no
+    // other download — finished or still running — is using.
+    this.filePath = resuming ? target : await reserveTarget(target);
 
     if (!info.resumable || info.totalSize === null || info.totalSize === 0) {
       await this.runSingleStream(info.totalSize);
@@ -173,7 +176,12 @@ export class Download extends EventEmitter<DownloadEvents> {
       segments: this.scheduler.snapshot(),
       createdAt: existing?.createdAt ?? new Date().toISOString(),
     };
-    this.journal = new JournalWriter(jPath, journalState);
+    // The journal belongs beside the part file actually being written. `jPath`
+    // is the wanted name's; when that name was taken and this download moved to
+    // "name (1)", a journal left at the wanted name sits beside someone else's
+    // finished file — and the next download of this URL "resumes" from it, into
+    // an empty part, and renames the result over that file.
+    this.journal = new JournalWriter(journalPath(this.filePath), journalState);
 
     this.status = 'downloading';
     this.startProgressTimer();
@@ -334,7 +342,7 @@ export class Download extends EventEmitter<DownloadEvents> {
 
   /** No range support: one connection, straight through, no resume. */
   private async runSingleStream(totalSize: number | null): Promise<void> {
-    this.filePath = await uniquePath(this.filePath);
+    // The name was reserved in start(); its empty part file is ours.
     this.writer = await PartFileWriter.create(partPath(this.filePath), 0);
     this.status = 'downloading';
     this.startProgressTimer();

@@ -12,4 +12,10 @@ contextBridge.exposeInMainWorld('idm', {
   port: (): Promise<number> => ipcRenderer.invoke('idm:port'),
   /** Credential for the local control server; see server.ts on why origin is not enough. */
   token: (): Promise<string> => ipcRenderer.invoke('idm:token'),
+  /** Open (or raise) a download's own progress window. */
+  openDetail: (id: string): Promise<void> => ipcRenderer.invoke('idm:open-detail', id),
+  /** Close this window, if it is a detail window rather than the list. */
+  closeSelf: (): Promise<void> => ipcRenderer.invoke('idm:close-self'),
+  /** Size this progress window to its content, so it is never taller than it needs. */
+  fitHeight: (px: number): Promise<void> => ipcRenderer.invoke('idm:fit-height', px),
 });

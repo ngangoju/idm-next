@@ -1,48 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Category, DownloadRecord, ServerEvent, Settings } from '../shared/protocol.ts';
-import { CATEGORIES, DEFAULT_PORT, humanizeError } from '../shared/protocol.ts';
+import { CATEGORIES, humanizeError } from '../shared/protocol.ts';
 import { SegmentStrip } from './SegmentStrip.tsx';
 import { AddDialog } from './AddDialog.tsx';
 import { FormatDialog } from './FormatDialog.tsx';
 import { SettingsDialog } from './SettingsDialog.tsx';
-import { DetailDialog } from './DetailDialog.tsx';
+import { API, authenticate, get, headers, post, subscribe } from './client.ts';
 import { bytes, eta, rate, relativeTime, hostOf } from './format.ts';
 import * as Icon from './icons.tsx';
-
-const API = `http://127.0.0.1:${DEFAULT_PORT}`;
-
-declare global {
-  interface Window {
-    idm?: {
-      reveal(p: string): Promise<void>;
-      open(p: string): Promise<string>;
-      chooseDir(): Promise<string | null>;
-      port(): Promise<number>;
-      token(): Promise<string>;
-    };
-  }
-}
-
-/**
- * The renderer authenticates with a token from preload rather than by origin:
- * a packaged build loads from file:// and reports `Origin: null`, which cannot
- * be allowlisted because a sandboxed iframe on any site reports it too.
- */
-let authToken = '';
-
-async function post(path: string, body: unknown = {}): Promise<unknown> {
-  const res = await fetch(`${API}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-idm-token': authToken },
-    body: JSON.stringify(body),
-  });
-  return res.json();
-}
-
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, { headers: { 'x-idm-token': authToken } });
-  return res.json() as Promise<T>;
-}
 
 type Filter = Category | 'all' | 'active' | 'done';
 
@@ -68,14 +33,6 @@ const STATUS_RANK: Record<string, number> = {
   cancelled: 5,
 };
 
-const CATEGORY_ICON: Record<Category, (p: { size?: number }) => React.ReactElement> = {
-  video: Icon.Film,
-  audio: Icon.Music,
-  documents: Icon.Doc,
-  compressed: Icon.Archive,
-  programs: Icon.AppBox,
-  other: Icon.FileGeneric,
-};
 
 export function App(): React.ReactElement {
   const [downloads, setDownloads] = useState<DownloadRecord[]>([]);
@@ -86,81 +43,57 @@ export function App(): React.ReactElement {
   const [showSettings, setShowSettings] = useState(false);
   const [ytdlp, setYtdlp] = useState<{ ok: boolean; version?: string; error?: string } | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
-
-  // Read inside the socket handler without re-subscribing on every change.
-  const autoOpenRef = useRef(true);
-  useEffect(() => {
-    autoOpenRef.current = settings?.autoOpenDetails ?? true;
-  }, [settings]);
 
   useEffect(() => {
-    let ws: WebSocket | null = null;
-    let retry: ReturnType<typeof setTimeout>;
-    let closed = false;
-
-    const connect = (): void => {
-      // A browser cannot set headers on a WebSocket handshake, so the token
-      // goes in the query string here.
-      ws = new WebSocket(`ws://127.0.0.1:${DEFAULT_PORT}/?token=${encodeURIComponent(authToken)}`);
-
-      ws.onopen = () => setConnected(true);
-      ws.onclose = () => {
-        setConnected(false);
-        if (!closed) retry = setTimeout(connect, 1000);
-      };
-      ws.onmessage = (e: MessageEvent<string>) => {
-        const event = JSON.parse(e.data) as ServerEvent;
-        switch (event.type) {
-          case 'downloads':
-            setDownloads(event.downloads);
-            break;
-          case 'download-added':
-            setDownloads((prev) => [event.download, ...prev]);
-            // The same thing IDM does: show the transfer as it begins. Only
-            // for a download that actually starts, so adding a batch paused
-            // does not throw a window on screen for each one.
-            if (autoOpenRef.current && event.download.status !== 'paused') {
-              setDetailId(event.download.id);
-            }
-            break;
-          case 'download-done':
-            setDownloads((prev) =>
-              prev.map((d) => (d.id === event.download.id ? event.download : d)),
-            );
-            break;
-          case 'download-removed':
-            setDownloads((prev) => prev.filter((d) => d.id !== event.id));
-            break;
-          case 'download-error':
-            setDownloads((prev) =>
-              prev.map((d) =>
-                d.id === event.id ? { ...d, status: 'failed', error: event.error } : d,
-              ),
-            );
-            break;
-          case 'progress': {
-            // Merge by id rather than replacing the list, so scroll position
-            // and any local state survive a 4 Hz tick.
-            const patch = new Map(event.downloads.map((p) => [p.id, p]));
-            setDownloads((prev) =>
-              prev.map((d) => {
-                const p = patch.get(d.id);
-                return p ? { ...d, ...p } : d;
-              }),
-            );
-            break;
-          }
-          case 'settings':
-            setSettings(event.settings);
-            break;
+    // A download's progress window is opened by the main process, not here:
+    // it appears while the browser is in front, and a panel inside a window
+    // nobody raised is the same as nothing appearing at all.
+    const onEvent = (event: ServerEvent): void => {
+      switch (event.type) {
+        case 'downloads':
+          setDownloads(event.downloads);
+          break;
+        case 'download-added':
+          setDownloads((prev) => [event.download, ...prev]);
+          break;
+        case 'download-done':
+        case 'download-restarted':
+          setDownloads((prev) =>
+            prev.map((d) => (d.id === event.download.id ? event.download : d)),
+          );
+          break;
+        case 'download-removed':
+          setDownloads((prev) => prev.filter((d) => d.id !== event.id));
+          break;
+        case 'download-error':
+          setDownloads((prev) =>
+            prev.map((d) =>
+              d.id === event.id ? { ...d, status: 'failed', error: event.error } : d,
+            ),
+          );
+          break;
+        case 'progress': {
+          // Merge by id rather than replacing the list, so scroll position
+          // and any local state survive a 4 Hz tick.
+          const patch = new Map(event.downloads.map((p) => [p.id, p]));
+          setDownloads((prev) =>
+            prev.map((d) => {
+              const p = patch.get(d.id);
+              return p ? { ...d, ...p } : d;
+            }),
+          );
+          break;
         }
-      };
+        case 'settings':
+          setSettings(event.settings);
+          break;
+      }
     };
 
+    let dispose = (): void => {};
     void (async () => {
-      authToken = (await window.idm?.token()) ?? '';
-      connect();
+      await authenticate();
+      dispose = subscribe({ onEvent, onConnected: setConnected });
       try {
         setSettings((await get<{ settings: Settings }>('/settings')).settings);
         setYtdlp(await get<{ ok: boolean; version?: string; error?: string }>('/ytdlp'));
@@ -169,10 +102,19 @@ export function App(): React.ReactElement {
       }
     })();
 
+    // Whether a finished file is still on disk changes behind our back — the
+    // usual way is someone tidying their Downloads folder. Coming back to the
+    // window is the moment to look again.
+    const recheck = (): void => {
+      void get<{ downloads: DownloadRecord[] }>('/downloads')
+        .then((r) => setDownloads(r.downloads))
+        .catch(() => undefined);
+    };
+    window.addEventListener('focus', recheck);
+
     return () => {
-      closed = true;
-      clearTimeout(retry);
-      ws?.close();
+      window.removeEventListener('focus', recheck);
+      dispose();
     };
   }, []);
 
@@ -265,7 +207,7 @@ export function App(): React.ReactElement {
 
           <div className="nav-label">Categories</div>
           {CATEGORIES.map((c) => {
-            const CatIcon = CATEGORY_ICON[c];
+            const CatIcon = Icon.CATEGORY_ICON[c];
             return (
               <NavItem
                 key={c}
@@ -357,7 +299,7 @@ export function App(): React.ReactElement {
             <EmptyState filter={filter} onAdd={() => setAdding(true)} />
           ) : (
             visible.map((d) => (
-              <Row key={d.id} d={d} onAct={act} onOpen={() => setDetailId(d.id)} />
+              <Row key={d.id} d={d} onAct={act} onOpen={() => void window.idm?.openDetail(d.id)} />
             ))
           )}
         </div>
@@ -387,7 +329,7 @@ export function App(): React.ReactElement {
           fetchExtraction={async (url) => {
             const res = await fetch(`${API}/extract`, {
               method: 'POST',
-              headers: { 'content-type': 'application/json', 'x-idm-token': authToken },
+              headers: headers(true),
               body: JSON.stringify({ url }),
             });
             const body = (await res.json()) as { error?: string };
@@ -404,15 +346,6 @@ export function App(): React.ReactElement {
           }}
         />
       )}
-
-      {detailId !== null && (() => {
-        const record = downloads.find((x) => x.id === detailId);
-        // The row can disappear underneath the window — cleared, or cancelled
-        // from another client.
-        return record ? (
-          <DetailDialog record={record} onClose={() => setDetailId(null)} onAct={act} />
-        ) : null;
-      })()}
 
       {showSettings && settings !== null && (
         <SettingsDialog
@@ -461,7 +394,7 @@ function Row({
   onAct: (path: string, id: string) => void;
   onOpen: () => void;
 }): React.ReactElement {
-  const CatIcon = CATEGORY_ICON[d.category];
+  const CatIcon = Icon.CATEGORY_ICON[d.category];
 
   // A finished download is 100% by definition. Deriving the bar from byte
   // counts left completed rows empty whenever the size was never known — which
@@ -566,12 +499,28 @@ function Row({
                 <Icon.Play size={14} />
               </IconButton>
             )}
-            {d.status === 'failed' && (
-              <IconButton label="Retry" onClick={() => onAct('/downloads/resume', d.id)}>
+            {/* After a failure, carry on from what already arrived — unless the
+                server changed the file, when carrying on can only fail again. */}
+            {d.status === 'failed' &&
+              d.downloaded > 0 &&
+              !/remote file changed/i.test(d.error ?? '') && (
+                <IconButton label="Resume" onClick={() => onAct('/downloads/resume', d.id)}>
+                  <Icon.Play size={14} />
+                </IconButton>
+              )}
+            {/* Start over, from nothing. Offered wherever that can help: after a
+                failure (a resume that keeps failing the same way needs this),
+                on a stopped download, and on a finished one — deleted or not. */}
+            {(d.status === 'failed' || d.status === 'paused' || done) && (
+              <IconButton
+                label="Download again"
+                emphasis={d.status === 'failed' || d.fileMissing === true}
+                onClick={() => onAct('/downloads/restart', d.id)}
+              >
                 <Icon.Retry size={14} />
               </IconButton>
             )}
-            {done && (
+            {done && !d.fileMissing && (
               <>
                 <IconButton label="Open file" onClick={() => void window.idm?.open(d.filePath)}>
                   <Icon.ExternalOpen size={14} />
@@ -636,6 +585,15 @@ function StatusChip({ d }: { d: DownloadRecord }): React.ReactElement {
     );
   }
 
+  if (d.fileMissing) {
+    return (
+      <span className="chip warn">
+        <Icon.Alert size={12} />
+        File missing
+      </span>
+    );
+  }
+
   const label: Record<string, string> = {
     downloading: 'Downloading',
     paused: 'Paused',
@@ -651,16 +609,19 @@ function IconButton({
   label,
   onClick,
   danger,
+  emphasis,
   children,
 }: {
   label: string;
   onClick: () => void;
   danger?: boolean;
+  /** The action this row most needs — drawn filled so it is found first. */
+  emphasis?: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
     <button
-      className={danger ? 'icon-btn danger' : 'icon-btn'}
+      className={['icon-btn', danger && 'danger', emphasis && 'emphasis'].filter(Boolean).join(' ')}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -669,6 +630,8 @@ function IconButton({
       aria-label={label}
     >
       {children}
+      {/* The one action a row most needs is named, not left to a tooltip. */}
+      {emphasis && <span>{label}</span>}
     </button>
   );
 }

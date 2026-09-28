@@ -29,6 +29,8 @@ export interface FixtureOptions {
   slowRange?: { from: number; to: number; bps: number };
   /** Send Content-Disposition with this raw value. */
   contentDisposition?: string;
+  /** Content-Type to report; defaults to application/octet-stream. */
+  contentType?: string;
 }
 
 export interface Fixture {
@@ -74,7 +76,7 @@ export async function startFixture(options: FixtureOptions): Promise<Fixture> {
     if (options.contentDisposition) {
       res.setHeader('Content-Disposition', options.contentDisposition);
     }
-    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Type', options.contentType ?? 'application/octet-stream');
 
     if (req.method === 'HEAD') {
       res.setHeader('Content-Length', String(total));

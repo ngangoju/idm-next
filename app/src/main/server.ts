@@ -203,7 +203,7 @@ export class ControlServer {
           case '/health':
             return json(res, 200, { ok: true, version: this.version });
           case '/downloads':
-            return json(res, 200, { downloads: this.manager.records });
+            return json(res, 200, { downloads: this.manager.snapshot() });
           case '/queues':
             return json(res, 200, { queues: this.manager.queues });
           case '/settings':
@@ -254,6 +254,13 @@ export class ControlServer {
           this.manager.resume(id);
           return json(res, 200, { ok: true });
         }
+        case '/downloads/restart': {
+          const { id } = body as { id?: string };
+          if (!id) return json(res, 400, { error: 'missing id' });
+          const record = await this.manager.restart(id);
+          if (!record) return json(res, 404, { error: 'no such download' });
+          return json(res, 200, { download: record });
+        }
         case '/downloads/cancel': {
           const { id } = body as { id?: string };
           if (!id) return json(res, 400, { error: 'missing id' });
@@ -279,7 +286,7 @@ export class ControlServer {
     this.sockets.add(ws);
     ws.on('close', () => this.sockets.delete(ws));
     send(ws, { type: 'hello', version: this.version });
-    send(ws, { type: 'downloads', downloads: this.manager.records });
+    send(ws, { type: 'downloads', downloads: this.manager.snapshot() });
   }
 
   private wireEvents(): void {
@@ -289,6 +296,9 @@ export class ControlServer {
       this.broadcast({ type: 'download-error', id, error }),
     );
     this.manager.on('removed', ({ id }) => this.broadcast({ type: 'download-removed', id }));
+    this.manager.on('restarted', (download) =>
+      this.broadcast({ type: 'download-restarted', download }),
+    );
     this.manager.on('settings', (settings) => this.broadcast({ type: 'settings', settings }));
     this.manager.on('progress', (batch) =>
       this.broadcast({

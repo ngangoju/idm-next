@@ -171,3 +171,16 @@ export const DownloadArrow = (p: IconProps): React.ReactElement => (
     <path d="M4.5 17.5v1.2a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1.2" />
   </Svg>
 );
+
+/** One icon per category, shared by the list and the progress window. */
+export const CATEGORY_ICON: Record<
+  import('../shared/protocol.ts').Category,
+  (p: { size?: number }) => React.ReactElement
+> = {
+  video: Film,
+  audio: Music,
+  documents: Doc,
+  compressed: Archive,
+  programs: AppBox,
+  other: FileGeneric,
+};
