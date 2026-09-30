@@ -19,6 +19,16 @@ export {
   uniquePath,
 } from './filename.ts';
 export { TokenBucket, RateLimiter } from './throttle.ts';
+export {
+  moveNoClobber,
+  removeWorkingFile,
+  replaceWorkingFile,
+  isWorkingFile,
+  retryWhileBusy,
+  setFileOpLogger,
+  logFileOp,
+  type FileOp,
+} from './fileops.ts';
 export { JournalWriter, readJournal, journalPath, partPath, reserveTarget } from './journal.ts';
 export { PartFileWriter, ensureSpace, hashFile, fileSize } from './writer.ts';
 export {

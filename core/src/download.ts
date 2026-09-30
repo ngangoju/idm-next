@@ -14,6 +14,7 @@ import {
 import { PartFileWriter, ensureSpace } from './writer.ts';
 import { JournalWriter, readJournal, journalPath, partPath, reserveTarget } from './journal.ts';
 import { resolveFilename, safeJoin } from './filename.ts';
+import { removeWorkingFile } from './fileops.ts';
 import { TokenBucket, RateLimiter } from './throttle.ts';
 import {
   DEFAULT_RETRY,
@@ -151,7 +152,7 @@ export class Download extends EventEmitter<DownloadEvents> {
 
     // Resuming continues our own part file. Anything else claims a name no
     // other download — finished or still running — is using.
-    this.filePath = resuming ? target : await reserveTarget(target);
+    this.filePath = resuming ? target : await reserveTarget(target, this.opts.owner);
 
     if (!info.resumable || info.totalSize === null || info.totalSize === 0) {
       await this.runSingleStream(info.totalSize);
@@ -181,7 +182,7 @@ export class Download extends EventEmitter<DownloadEvents> {
     // "name (1)", a journal left at the wanted name sits beside someone else's
     // finished file — and the next download of this URL "resumes" from it, into
     // an empty part, and renames the result over that file.
-    this.journal = new JournalWriter(journalPath(this.filePath), journalState);
+    this.journal = new JournalWriter(journalPath(this.filePath), journalState, this.opts.owner);
 
     this.status = 'downloading';
     this.startProgressTimer();
@@ -200,7 +201,7 @@ export class Download extends EventEmitter<DownloadEvents> {
       throw new Error('Download ended with segments incomplete');
     }
 
-    await this.writer.finalize(this.filePath);
+    this.filePath = await this.writer.finalize(this.filePath, this.opts.owner);
     await this.journal.remove();
     this.status = 'completed';
     this.stopProgressTimer();
@@ -381,7 +382,7 @@ export class Download extends EventEmitter<DownloadEvents> {
       seg.end = Math.max(seg.end, written - 1);
     }
 
-    await this.writer.finalize(this.filePath);
+    this.filePath = await this.writer.finalize(this.filePath, this.opts.owner);
     this.totalSize = written;
     this.status = 'completed';
     this.stopProgressTimer();
@@ -442,6 +443,11 @@ export class Download extends EventEmitter<DownloadEvents> {
     this.stopProgressTimer();
     await this.writer?.close().catch(() => {});
     await this.journal?.remove().catch(() => {});
+    // Cancelled means discarded: the partial data goes too, or every
+    // cancelled download leaves a file-sized .part behind for good.
+    if (this.filePath) {
+      await removeWorkingFile(partPath(this.filePath), this.opts.owner).catch(() => {});
+    }
     this.emitProgress();
   }
 

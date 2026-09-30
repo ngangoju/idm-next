@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import { exec } from 'node:child_process';
 import {
   Download,
@@ -18,7 +18,8 @@ import {
   probe,
   makeDispatcher,
   fileSize,
-  uniquePath,
+  moveNoClobber,
+  removeWorkingFile,
 } from '@idm-next/core';
 import type { ProgressSnapshot } from '@idm-next/core';
 import { Store } from './store.ts';
@@ -223,6 +224,7 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
         url: record.url,
         destDir: record.destDir,
         filename: record.filename,
+        owner: record.id,
         connections: record.connections,
         ...(headers ? { headers } : {}),
         ...(this.store.settings.proxy ? { proxy: this.store.settings.proxy } : {}),
@@ -361,9 +363,15 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
         this.store.settings.ffmpegPath.replace(/ffmpeg$/, 'ffprobe'),
       ).catch(() => undefined);
 
-      const finalPath = await uniquePath(join(record.destDir, basename(produced)));
-      await rename(produced, finalPath);
-      await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+      // Claim the name and place the file in one step: checking for a free
+      // name first and renaming after left a window in which a file of the
+      // same name could appear — and rename would have replaced it.
+      const finalPath = await moveNoClobber(
+        produced,
+        join(record.destDir, basename(produced)),
+        record.id,
+      );
+      await removeWorkingFile(staging, record.id).catch(() => undefined);
 
       // A short download can finish before yt-dlp emits a single progress tick,
       // which would leave the record claiming 0 bytes. Take the truth from the
@@ -394,10 +402,9 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
       this.pumpQueue();
     } catch (err) {
       this.external.delete(record.id);
-      await rm(join(record.destDir, `.idm-staging-${record.id}`), {
-        recursive: true,
-        force: true,
-      }).catch(() => undefined);
+      await removeWorkingFile(join(record.destDir, `.idm-staging-${record.id}`), record.id).catch(
+        () => undefined,
+      );
 
       if (controller.signal.aborted) {
         this.setStatus(record.id, 'paused');
@@ -471,7 +478,7 @@ export class DownloadManager extends EventEmitter<ManagerEvents> {
     if (record.status !== 'completed') {
       await Promise.all(
         [partPath(record.filePath), journalPath(record.filePath)].map((p) =>
-          rm(p, { force: true }).catch(() => undefined),
+          removeWorkingFile(p, id).catch(() => undefined),
         ),
       );
     }

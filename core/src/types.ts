@@ -50,6 +50,8 @@ export interface DownloadOptions {
   maxRetries?: number;
   proxy?: string;
   signal?: AbortSignal;
+  /** Who this download is, in the file-operations log (the app's record id). */
+  owner?: string;
 }
 
 export type DownloadStatus =

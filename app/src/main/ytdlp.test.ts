@@ -10,7 +10,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, rm, access } from 'node:fs/promises';
+import { mkdtemp, rm, access, mkdir, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -344,12 +344,32 @@ describe('remuxIfMislabelled', { skip: hasFfmpeg ? false : 'ffmpeg not installed
     // name. VLC copes; Safari, QuickTime and browsers do not.
     const dir = await mkdtemp(join(tmpdir(), 'idm-remux-'));
     try {
-      const file = await makeTs(dir, 'clip.mp4');
+      // Where the app runs it: inside the download's staging directory.
+      const staging = join(dir, '.idm-staging-test');
+      await mkdir(staging);
+      const file = await makeTs(staging, 'clip.mp4');
       assert.match(await probeContainer(file), /mpegts/, 'fixture precondition');
 
       const result = await remuxIfMislabelled(file);
       assert.equal(result.remuxed, true);
       assert.match(await probeContainer(file), /mp4/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('never rewrites a file outside a staging directory', async () => {
+    // A user's own file is never replaced, even by a fix-up meant to help:
+    // the replace is refused and the file is left exactly as it was.
+    const dir = await mkdtemp(join(tmpdir(), 'idm-remux-own-'));
+    try {
+      const file = await makeTs(dir, 'clip.mp4');
+      const before = await readFile(file);
+
+      const result = await remuxIfMislabelled(file);
+      assert.equal(result.remuxed, false);
+      assert.deepEqual(await readFile(file), before);
+      assert.deepEqual(await readdir(dir), ['clip.mp4'], 'no temporary file left behind');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

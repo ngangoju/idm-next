@@ -25,6 +25,8 @@ import { Store } from './store.ts';
 import { DownloadManager } from './manager.ts';
 import { ControlServer } from './server.ts';
 import { shouldAutoOpen } from './detail.ts';
+import { createOpLog } from './oplog.ts';
+import { setFileOpLogger } from '@idm-next/core';
 import { DEFAULT_PORT } from '../shared/protocol.ts';
 
 /**
@@ -69,6 +71,11 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function main(): Promise<void> {
+  // First, before anything can touch a file: every create, move and delete is
+  // recorded (~/Library/Logs/IDM-Next on macOS, %APPDATA%\IDM-Next\logs on
+  // Windows), so a file that goes missing can always be accounted for.
+  setFileOpLogger(createOpLog({ dir: app.getPath('logs') }));
+
   const store = await Store.open(join(app.getPath('userData'), 'state.json'));
   manager = new DownloadManager(store);
   await manager.init();

@@ -5,8 +5,9 @@
  * the write leaves the previous good journal intact rather than a truncated one.
  * Debounced, because fsyncing on every chunk would dominate the transfer.
  */
-import { writeFile, readFile, rename, unlink, access, mkdir, open } from 'node:fs/promises';
+import { writeFile, readFile, access, mkdir, open } from 'node:fs/promises';
 import { dirname, extname } from 'node:path';
+import { logFileOp, removeWorkingFile, replaceWorkingFile } from './fileops.ts';
 import type { Journal, SegmentState } from './types.ts';
 
 const DEBOUNCE_MS = 1000;
@@ -27,9 +28,12 @@ export class JournalWriter {
   private readonly path: string;
   private state: Journal;
 
-  constructor(path: string, state: Journal) {
+  private readonly owner: string | undefined;
+
+  constructor(path: string, state: Journal, owner?: string) {
     this.path = path;
     this.state = state;
+    this.owner = owner;
   }
 
   /** Record new segment positions; the write itself is debounced. */
@@ -52,7 +56,7 @@ export class JournalWriter {
     this.writing = this.writing.then(async () => {
       const tmp = `${this.path}.tmp`;
       await writeFile(tmp, JSON.stringify(this.state), 'utf8');
-      await rename(tmp, this.path);
+      await replaceWorkingFile(tmp, this.path, this.owner);
     });
     return this.writing;
   }
@@ -64,7 +68,7 @@ export class JournalWriter {
     }
     this.dirty = false;
     await this.writing.catch(() => {});
-    await unlink(this.path).catch(() => {});
+    await removeWorkingFile(this.path, this.owner).catch(() => {});
   }
 }
 
@@ -116,7 +120,7 @@ function isJournal(v: unknown): v is Journal {
  * and the part is created with O_EXCL — two downloads racing for one name
  * cannot both win.
  */
-export async function reserveTarget(target: string): Promise<string> {
+export async function reserveTarget(target: string, owner?: string): Promise<string> {
   const ext = extname(target);
   const stem = ext ? target.slice(0, -ext.length) : target;
   await mkdir(dirname(target), { recursive: true });
@@ -126,6 +130,7 @@ export async function reserveTarget(target: string): Promise<string> {
     if ((await taken(candidate)) || (await taken(journalPath(candidate)))) continue;
     try {
       await (await open(partPath(candidate), 'wx')).close();
+      logFileOp({ op: 'reserve', path: partPath(candidate), owner });
       return candidate;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue;

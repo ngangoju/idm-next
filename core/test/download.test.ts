@@ -7,7 +7,7 @@
  */
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { once } from 'node:events';
@@ -425,6 +425,48 @@ describe('the journal', () => {
       assert.equal(sha256(await readFile(first.path)), sha256(body), 'the first file is untouched');
       assert.equal(sha256(await readFile(third.path)), sha256(body));
       assert.notEqual(third.path, first.path);
+    } finally {
+      await fx.close();
+    }
+  });
+});
+
+describe('file safety in the engine', () => {
+  test('cancelling leaves nothing behind', async () => {
+    const body = makeBody(3 * MB);
+    const fx = await startFixture({ body, slowRange: { from: 0, to: body.length, bps: 1 * MB } });
+    const dest = await tempDir();
+    try {
+      const dl = new Download({ url: fx.url, destDir: dest, connections: 2 });
+      void dl.start().catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 300));
+      await dl.cancel();
+      // Before: the journal went, the file-sized .part stayed forever.
+      assert.deepEqual(await readdir(dest), []);
+    } finally {
+      await fx.close();
+    }
+  });
+
+  test('a file that takes the name mid-download is never replaced', async () => {
+    // The name was free when the download started; by the time it finishes,
+    // something else — the user, another app — has put a file there.
+    const body = makeBody(2 * MB);
+    const fx = await startFixture({ body, slowRange: { from: 0, to: body.length, bps: 2 * MB } });
+    const dest = await tempDir();
+    try {
+      const dl = new Download({ url: fx.url, destDir: dest, connections: 2 });
+      const done = once(dl, 'done');
+      const started = dl.start();
+      await new Promise((r) => setTimeout(r, 150));
+      await writeFile(join(dest, 'file.bin'), 'someone else’s');
+      await started;
+      const [{ filePath }] = (await done) as [{ filePath: string }];
+
+      assert.equal(await readFile(join(dest, 'file.bin'), 'utf8'), 'someone else’s');
+      assert.equal(basename(filePath), 'file (1).bin');
+      assert.equal(dl.path, filePath);
+      assert.equal(sha256(await readFile(filePath)), sha256(body));
     } finally {
       await fx.close();
     }

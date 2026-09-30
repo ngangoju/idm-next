@@ -15,6 +15,7 @@
  * yt-dlp and ffmpeg are invoked as external processes, never bundled or linked,
  * which keeps their GPL out of this project's licensing.
  */
+import { removeWorkingFile, replaceWorkingFile } from '@idm-next/core';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
@@ -460,12 +461,12 @@ export async function remuxIfMislabelled(
       ['-v', 'error', '-y', '-i', filePath, '-c', 'copy', '-movflags', '+faststart', tmp],
       10 * 60_000,
     );
-    const { rename } = await import('node:fs/promises');
-    await rename(tmp, filePath);
+    // Replaces the staged download with its remuxed copy — both still inside
+    // the staging directory, so nothing of the user's is at stake.
+    await replaceWorkingFile(tmp, filePath);
     return { remuxed: true, container: 'mp4' };
   } catch {
-    const { unlink } = await import('node:fs/promises');
-    await unlink(tmp).catch(() => {});
+    await removeWorkingFile(tmp).catch(() => {});
     // A failed remux is not a failed download; keep the playable TS.
     return { remuxed: false, container };
   }

@@ -6,12 +6,13 @@
  * once because it does not touch the shared file offset — so N connections can
  * land their ranges concurrently without locking.
  */
-import { open, statfs, mkdir, rename, stat } from 'node:fs/promises';
+import { open, statfs, mkdir, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createHash, type Hash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { InsufficientSpaceError } from './types.ts';
+import { moveNoClobber } from './fileops.ts';
 
 /**
  * ftruncate on a sparse filesystem succeeds whether or not the space exists,
@@ -76,11 +77,15 @@ export class PartFileWriter {
     await this.handle.close().catch(() => {});
   }
 
-  /** Drop the .part suffix once every segment has landed. */
-  async finalize(finalPath: string): Promise<void> {
+  /**
+   * Drop the .part suffix once every segment has landed, and say where the
+   * file ended up: if something took the name meanwhile, it lands beside it
+   * as "name (1)" rather than replacing it.
+   */
+  async finalize(finalPath: string, owner?: string): Promise<string> {
     await this.sync();
     await this.close();
-    await rename(this.partPath, finalPath);
+    return moveNoClobber(this.partPath, finalPath, owner);
   }
 }
 
